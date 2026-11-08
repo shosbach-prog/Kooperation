@@ -52,13 +52,13 @@ async function demoLogin(section) {
   const qualLabel = h('label', {}, 'Qualifikation', qual);
   const stationLabel = h('label', {}, 'Station', station);
   rolle.addEventListener('change', () => { const pdl = rolle.value === 'pdl'; qualLabel.hidden = pdl; stationLabel.hidden = pdl; });
-  neu.append(
+  neu.append(...[
     h('label', {}, 'Ihr Name', h('input', { name: 'name', required: true, minlength: 2, maxlength: 60, placeholder: 'z. B. Maria Muster', autocomplete: 'off' })),
     h('label', {}, 'Ich bin …', rolle), qualLabel, d.stationen.length ? stationLabel : null,
-    h('button', { type: 'submit' }, 'Anlegen und loslegen'));
+    h('button', { type: 'submit' }, 'Anlegen und loslegen')].filter(Boolean));
   neu.addEventListener('submit', (e) => { e.preventDefault(); demoAnmelden('api/demo/person', Object.fromEntries(new FormData(neu))); });
 
-  details.before(
+  details.before(...[
     h('div', { class: 'demo-hinweis' }, h('span', { class: 'badge warn' }, 'Demo-Modus'),
       h('p', { class: 'small' }, 'Wählen Sie, wer Sie sind – Sie sind sofort angemeldet, ohne Passwort und ohne Code. Bitte keine echten Personen- oder Gesundheitsdaten eingeben.')),
     h('h2', { class: 'demo-h' }, 'Leitung'),
@@ -66,7 +66,7 @@ async function demoLogin(section) {
     h('h2', { class: 'demo-h' }, 'Pflege'),
     h('div', { class: 'demo-grid' }, d.pflege.map(personButton)),
     h('details', { class: 'demo-neu-wrap' }, h('summary', {}, '＋ Als neue Person ausprobieren'), neu),
-    state.branding.live_link ? h('p', { class: 'demo-live' }, h('a', { href: state.branding.live_link }, '→ Zur Anmeldung mit echten Daten')) : null);
+    state.branding.live_link ? h('p', { class: 'demo-live' }, h('a', { href: state.branding.live_link }, '→ Zur Anmeldung mit echten Daten')) : null].filter(Boolean));
   details.remove(); // Passwort-Anmeldung gibt es im Demo-Bereich nicht – dafür die echte Anmeldung
 }
 

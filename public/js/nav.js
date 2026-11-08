@@ -12,6 +12,7 @@ const ICON_PATHS = {
   wand: '<path d="M4 20l11-11M14 4l1 2.5L17.5 7.5 15 8.5 14 11l-1-2.5L10.5 7.5 13 6.5zM19 13l.6 1.4 1.4.6-1.4.6L19 17l-.6-1.4-1.4-.6 1.4-.6z"/>',
   users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><circle cx="17" cy="9" r="2.6"/><path d="M16.5 14.6c2.6.2 4.5 1.9 5 4.9"/>',
   campus: '<path d="M3 21h18M5 21V8l7-4 7 4v13"/><path d="M9.5 21v-5h5v5M9 10.5h1.5M13.5 10.5H15"/>',
+  stopwatch: '<circle cx="12" cy="14" r="7.5"/><path d="M12 10.5V14l2 1.5M10 2.5h4M12 2.5v4M18.5 6.5l1.5-1.5"/>',
   clock: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9 2.5h6"/>',
   sliders: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
   chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
@@ -36,6 +37,7 @@ function icon(name) {
 // ---------- Navigation ----------
 const VIEWS = {
   plan: { label: 'Dienstplan', icon: 'plan', group: 'mein', render: () => renderPlan() },
+  stempel: { label: 'Stempeluhr', short: 'Stempeln', icon: 'stopwatch', group: 'mein', render: () => renderStempeluhr(), staff: true },
   mine: { label: 'Meine Dienste', short: 'Meine', icon: 'mine', group: 'mein', render: () => renderMine(), staff: true },
   abwesenheit: { label: 'Urlaub & Krank', short: 'Urlaub', icon: 'urlaub', group: 'mein', render: () => renderMyAbsences(), staff: true },
   konto: { label: 'Stundenkonto', short: 'Stunden', icon: 'konto', group: 'mein', render: () => renderKonto(), staff: true },
@@ -59,8 +61,8 @@ const viewAllowed = (v) => (v.full ? isFullMgr() : v.mgr ? isMgr() : v.staff ? i
 /** Schnellzugriff unten (Handy/Tablet), je nach Rolle */
 function bottomKeys() {
   if (isMgr() && !isStaffRole()) return ['plan', 'abwesenheiten', 'staff'];
-  if (isMgr()) return ['plan', 'mine', 'abwesenheiten'];
-  return ['plan', 'mine', 'abwesenheit'];
+  if (isMgr()) return ['plan', 'stempel', 'mine', 'abwesenheiten'];
+  return ['plan', 'stempel', 'mine', 'abwesenheit'];
 }
 
 function setNavOpen(open) { document.body.classList.toggle('nav-open', open); }

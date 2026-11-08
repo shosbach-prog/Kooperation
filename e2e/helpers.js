@@ -53,6 +53,10 @@ async function layoutProblems(page) {
     const W = window.innerWidth;
     const out = [];
     if (document.documentElement.scrollWidth - W > 0) out.push(`horizontaler Überlauf ${document.documentElement.scrollWidth - W}px`);
+    // versehentlich ausgegebene leere Werte
+    const t = document.body.innerText;
+    const m = t.match(/(^|[\s(])(null|undefined|NaN)([\s).,]|$)/);
+    if (m) out.push(`Text „${m[2]}“ sichtbar: …${t.slice(Math.max(0, m.index - 30), m.index + 30).replace(/\s+/g, ' ')}…`);
     if (matchMedia('(pointer: coarse)').matches) {
       for (const el of document.querySelectorAll('button, a.button, select, input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=color])')) {
         const r = el.getBoundingClientRect();

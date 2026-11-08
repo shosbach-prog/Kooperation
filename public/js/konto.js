@@ -124,8 +124,8 @@ async function refreshMe() {
 function renderWho() {
   const rolle = state.me.is_haupt ? 'Hauptverwaltung' : state.me.admin_rechte === 'vertretung' && isMgr() ? `Vertretung bis ${fmtDate(state.me.admin_bis)}`
     : isMgr() ? 'Verwaltung' : 'Mitarbeiter/in';
-  document.getElementById('who').replaceChildren(h('span', { class: 'person', title: `${state.me.name} (${rolle})` }, avatar(state.me, 28),
-    h('span', { class: 'who-name' }, `${state.me.name} (${rolle})`)), demoWho());
+  document.getElementById('who').replaceChildren(...[h('span', { class: 'person', title: `${state.me.name} (${rolle})` }, avatar(state.me, 28),
+    h('span', { class: 'who-name' }, `${state.me.name} (${rolle})`)), demoWho()].filter(Boolean));
 }
 
 async function renderAccount() {

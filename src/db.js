@@ -46,6 +46,10 @@ const DEFAULT_SETTINGS = {
   loeschfrist_au_monate: 12,
   loeschfrist_protokoll_monate: 24,
   loeschfrist_mitteilungen_tage: 90,
+  // Stempeluhr: fehlende gesetzliche Mindestpause (§ 4 ArbZG: > 6 Std. 30 Min., > 9 Std. 45 Min.) automatisch abziehen
+  mindestpause_ergaenzen: true,
+  // Raucherpausen sind keine Arbeitszeit und werden abgezogen (false = als Arbeitszeit werten)
+  raucherpause_abziehen: true,
   impressum_text: '',
   datenschutz_text: '',
   // Lohnart-Nummern für die Übergabe an die Entgeltabrechnung (Schlüssel=Nummer); bitte mit der Personalabteilung abstimmen
@@ -260,6 +264,25 @@ CREATE TABLE IF NOT EXISTS urlaub_uebertrag (
   PRIMARY KEY (user_id, jahr)
 );
 
+CREATE TABLE IF NOT EXISTS stempel (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  shift_id INTEGER REFERENCES shifts(id) ON DELETE SET NULL,
+  kommen_at INTEGER NOT NULL,
+  gehen_at INTEGER,
+  korrigiert INTEGER NOT NULL DEFAULT 0,
+  note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_stempel_user ON stempel(user_id, kommen_at);
+CREATE TABLE IF NOT EXISTS stempel_pausen (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  stempel_id INTEGER NOT NULL REFERENCES stempel(id) ON DELETE CASCADE,
+  art TEXT NOT NULL DEFAULT 'pause' CHECK (art IN ('pause','raucher')),
+  start_at INTEGER NOT NULL,
+  ende_at INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS passkeys (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -372,6 +395,8 @@ function migrate(db) {
   add('assignments', 'ist_by INTEGER');
   add('assignments', 'ist_at TEXT');
   add('assignments', 'einsatz_std REAL');
+  add('assignments', 'ist_raucher_min INTEGER');
+  add('assignments', "ist_quelle TEXT NOT NULL DEFAULT ''");
   // Dienstarten: normaler Dienst, Bereitschaftsdienst (Bewertung in %), Rufbereitschaft
   add('shift_types', "art TEXT NOT NULL DEFAULT 'dienst'");
   add('shift_types', 'bewertung INTEGER NOT NULL DEFAULT 100');

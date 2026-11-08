@@ -146,6 +146,8 @@ async function renderSettings() {
     ['zulage_wechselschicht_eur', 'Wechselschichtzulage pro Monat (€)', 'number', 'TVöD § 8 Abs. 5 – Betrag bitte mit aktuellem Tarif abgleichen'],
     ['wechselschicht_min_naechte', 'Wechselschicht ab … Nachtschichten im Monat', 'number', 'TVöD § 7 Abs. 1: mind. 2 Nachtschichten'],
     ['zulage_schicht_eur', 'Schichtzulage pro Monat (€)', 'number', 'TVöD § 8 Abs. 6 – Betrag bitte mit aktuellem Tarif abgleichen'],
+    ['mindestpause_ergaenzen', 'Stempeluhr: fehlende gesetzliche Mindestpause automatisch abziehen', 'checkbox', '§ 4 ArbZG: über 6 Std. 30 Min., über 9 Std. 45 Min.; nur Pausen ab 15 Min. zählen'],
+    ['raucherpause_abziehen', 'Raucherpausen von der Arbeitszeit abziehen', 'checkbox', 'Raucherpausen sind keine Arbeitszeit (Dienstvereinbarung beachten)'],
     ['ist_frist_tage', 'Ist-Zeiten selbst erfassen bis … Tage nach dem Dienst', 'number', 'Danach nur noch durch die Verwaltung; 0 = unbegrenzt'],
     ['ruf_faktor_werktag', 'Rufbereitschaft ≥ 12 Std. Mo–Fr: Pauschale = … × Stundenentgelt', 'number', 'TVöD § 8 Abs. 3: 2-fach'],
     ['ruf_faktor_wochenende', 'Rufbereitschaft ≥ 12 Std. Sa/So/Feiertag: … × Stundenentgelt', 'number', 'TVöD § 8 Abs. 3: 4-fach'],

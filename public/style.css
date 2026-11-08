@@ -503,3 +503,33 @@ a.demo-rolle strong { font-size: 1.05rem; }
 .who #who { gap: .4rem; align-items: center; }
 .who #who .avatar, .who #who .demo-switch { flex: none; }
 @media (max-width: 1099px) { .who #who, .who #who .person { flex: none; } body.demo #logout { display: none; } }
+
+/* Stempeluhr */
+.stempeluhr { max-width: 560px; display: grid; gap: .8rem; }
+.stempel-kopf { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; }
+.stempel-kopf h2 { margin: 0; }
+.stempel-uhr { font-variant-numeric: tabular-nums; font-size: 1.1rem; color: var(--muted); }
+.stempel-status { margin: 0; font-size: 1.15rem; font-weight: 700; }
+.stempel-status.an { color: var(--ok); }
+.stempel-status.pause { color: var(--warn); }
+.stempel-dienst { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.stempel-zaehler { display: grid; justify-items: center; padding: .6rem; border-radius: var(--radius); background: color-mix(in srgb, var(--primary) 7%, var(--card)); }
+.stempel-zaehler strong { font-size: clamp(2.4rem, 12vw, 3.4rem); font-variant-numeric: tabular-nums; letter-spacing: .02em; line-height: 1.1; }
+button.stempel-btn { min-height: 64px; font-size: 1.25rem; font-weight: 700; width: 100%; border-radius: var(--radius); }
+button.stempel-btn.kommen { background: var(--ok); border-color: var(--ok); color: #fff; }
+button.stempel-btn.gehen { background: var(--bad); border-color: var(--bad); color: #fff; }
+button.stempel-btn.weiter { background: var(--primary); color: var(--primary-ink); }
+button.stempel-btn:disabled { opacity: .5; }
+.stempel-pausen-btns { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+.stempel-pausen-btns .stempel-btn { min-height: 56px; font-size: 1.05rem; }
+.stempel-liste { list-style: none; margin: 0; padding: 0; display: grid; gap: .3rem; font-size: .92rem; }
+.stempel-liste li { display: flex; justify-content: space-between; gap: .5rem; flex-wrap: wrap; border-bottom: 1px dashed var(--line); padding: .25rem 0; }
+.stempel-erledigt h3 { margin: .3rem 0; font-size: 1rem; }
+.stempel-ergebnis { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: .6rem .7rem; display: grid; gap: .4rem; }
+.stempel-ergebnis dl { display: grid; grid-template-columns: auto 1fr; gap: .2rem .8rem; margin: 0; font-size: .92rem; }
+.stempel-ergebnis dt { color: var(--muted); }
+.stempel-ergebnis dd { margin: 0; text-align: right; }
+.stempel-vergessen { border: 1px solid var(--warn); border-radius: var(--radius-sm); padding: .6rem; background: var(--warn-bg); }
+.stempel-vergessen p { margin: 0 0 .5rem; }
+button.linkish { background: none; border: 0; color: var(--primary); text-decoration: underline; padding: .3rem; min-height: 32px; justify-self: center; font-weight: 400; }
+.zeit-stempel { margin: .25rem 0 0; padding: 0; list-style: none; font-size: .8rem; color: var(--muted); }

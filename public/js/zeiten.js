@@ -16,7 +16,7 @@ async function editZeit(z) {
       { name: 'ist_start', label: 'Kommen', type: 'time', required: true, value: z.ist_start || z.start_time },
       { name: 'ist_end', label: 'Gehen', type: 'time', required: true, value: z.ist_end || z.end_time },
       { name: 'ist_pause', label: 'Pause (Min.)', type: 'number', min: 0, step: 5, value: z.ist_pause ?? z.break_min, inputmode: 'numeric' },
-      { name: 'ist_note', label: 'Bemerkung (z. B. Grund für Überstunden)', value: z.ist_note || '', maxlength: 300 },
+      { name: 'ist_note', label: z.ist_quelle === 'stempel' && !isMgr() ? 'Begründung der Änderung (Pflicht – Zeiten stammen von der Stempeluhr)' : 'Bemerkung (z. B. Grund für Überstunden)', value: z.ist_note || '', maxlength: 300, required: z.ist_quelle === 'stempel' && !isMgr() },
     ],
   });
   if (!r) return false;
@@ -53,7 +53,13 @@ function zeitenTable(list, { withName, rerender }) {
       h('td', {}, h('span', { class: 'chip', style: { background: z.type_color } }, z.type_code), z.type_name, z.art !== 'dienst' ? h('div', { class: 'small muted' }, ART_LABEL[z.art]) : null,
         h('div', { class: 'small muted' }, z.unit_name)),
       h('td', {}, `${z.start_time}–${z.end_time}`, h('div', { class: 'small muted' }, `${fmtNum(z.plan_std)} Std.`)),
-      h('td', {}, zeitIst(z) || h('span', { class: 'muted' }, 'offen'), z.ist_note ? h('div', { class: 'small muted' }, z.ist_note) : null,
+      h('td', {}, zeitIst(z) || h('span', { class: 'muted' }, 'offen'),
+        z.ist_quelle === 'stempel' ? h('div', {}, h('span', { class: 'badge ok' }, '⏱ Stempeluhr')) : z.ist_quelle === 'manuell' && z.stempel?.length ? h('div', {}, h('span', { class: 'badge warn' }, 'Stempelzeit geändert')) : null,
+        z.ist_raucher_min ? h('div', { class: 'small muted' }, `davon Raucherpausen ${z.ist_raucher_min} Min.`) : null,
+        z.stempel?.length ? h('ul', { class: 'zeit-stempel' }, z.stempel.map((st) => h('li', {},
+          `Kommen ${st.kommen} – Gehen ${st.gehen || 'läuft'}${st.nachgetragen ? ' (nachgetragen)' : ''}`,
+          st.pausen.map((p) => h('div', {}, `${p.art === 'raucher' ? 'Raucherpause' : 'Pause'} ${p.von}–${p.bis || '…'}${p.min !== null ? ` (${p.min} Min.)` : ''}`))))) : null,
+        z.ist_note ? h('div', { class: 'small muted' }, z.ist_note) : null,
         z.ist_by_name && z.ist_by_name !== z.name ? h('div', { class: 'small muted' }, `erfasst von ${z.ist_by_name}`) : null),
       h('td', {}, zeitDiff(z)),
       h('td', { class: 'actions' },

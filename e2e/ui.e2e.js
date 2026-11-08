@@ -13,7 +13,7 @@ let server, url, browser, mgr, staff;
 
 const VIEWS = {
   manager: ['plan', 'tausch', 'abwesenheiten', 'staff', 'stationen', 'generate', 'types', 'req', 'zeiten', 'report', 'log', 'settings', 'account'],
-  staff: ['plan', 'mine', 'abwesenheit', 'konto', 'wuensche', 'tausch', 'account'],
+  staff: ['plan', 'stempel', 'mine', 'abwesenheit', 'konto', 'wuensche', 'tausch', 'account'],
 };
 const DEVICES = () => ({
   'iPhone 13': H.playwright.devices['iPhone 13'],
@@ -216,4 +216,49 @@ test('Demo-Modus: Rolle wählen, sofort angemeldet, Rolle wechseln, neue Person'
     assert.deepEqual(errors, []);
     await ctx.close();
   } finally { demo.server.close(); }
+});
+
+test('Stempeluhr am Handy: Kommen, Raucherpause, Pause beenden, Gehen', { skip }, async () => {
+  // Dienst, der gerade läuft, für Anna anlegen
+  const m = await browser.newContext({ storageState: mgr.state });
+  const api = async (method, u, data) => (await m.request.fetch(`${url}${u}`, { method, data })).json();
+  const fmt = (ms) => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ms)).split(' ');
+  const [datum, beginn] = fmt(Date.now() - 20 * 60e3);
+  const ende = fmt(Date.now() + 7 * 3600e3)[1];
+  const typ = await api('POST', 'api/shift-types', { name: 'Stempeltest', code: 'ST', start_time: beginn, end_time: ende, break_min: 30, color: '#2a7149' });
+  const units = await api('GET', 'api/units');
+  await api('PUT', 'api/requirements', [0, 1, 2, 3, 4, 5, 6].map((w) => ({ unit_id: units[0].id, shift_type_id: typ.id, weekday: w, min_staff: 1 })));
+  await api('POST', 'api/shifts/generate', { from: datum, to: datum });
+  const shift = (await api('GET', `api/plan?from=${datum}&to=${datum}`)).shifts.find((x) => x.shift_type_id === typ.id);
+  const users = await api('GET', 'api/users');
+  await api('POST', `api/shifts/${shift.id}/assign`, { user_id: users.find((u) => u.username === 'abecker').id, force: true });
+  await m.close();
+
+  const { ctx, page, errors } = await open(DEVICES()['iPhone 13'], staff.state);
+  await show(page, 'stempel');
+  await page.waitForSelector('button.stempel-btn.kommen:not([disabled])');
+  assert.match(await page.textContent('.stempeluhr'), /Stempeltest/);
+  assert.deepEqual(await H.axe(page), []);
+  await page.click('button.stempel-btn.kommen');
+  await page.waitForSelector('.stempel-status.an');
+  await page.waitForTimeout(1100);
+  assert.match(await page.textContent('.stempel-zaehler strong'), /^00:00:0[1-9]$/);
+  await page.click('button.stempel-btn.raucher');
+  await page.waitForSelector('.stempel-status.pause');
+  assert.match(await page.textContent('.stempel-status'), /Raucherpause/);
+  assert.deepEqual(await H.axe(page), []);
+  assert.deepEqual(await H.layoutProblems(page), []);
+  await page.screenshot({ path: require('path').join(require('os').tmpdir(), 'pep-stempel.png') });
+  await page.click('button.stempel-btn.weiter');
+  await page.waitForSelector('.stempel-liste li');
+  await page.click('button.stempel-btn.gehen');
+  await page.click('dialog[open] button:has-text("Ausstempeln")');
+  await page.waitForSelector('.stempel-ergebnis');
+  await page.screenshot({ path: require('path').join(require('os').tmpdir(), 'pep-stempel-fertig.png') });
+  assert.match(await page.textContent('.stempel-ergebnis'), /Raucherpausen/);
+  // Ist-Zeit ist übernommen
+  await show(page, 'mine');
+  await page.waitForSelector('text=⏱ Stempeluhr');
+  assert.deepEqual(errors, []);
+  await ctx.close();
 });
