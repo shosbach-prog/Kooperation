@@ -19,7 +19,7 @@ test.after(() => server.close());
 
 function client() {
   let cookie = '';
-  return async (method, url, body) => {
+  const c = async (method, url, body) => {
     const res = await fetch(base + url, {
       method,
       headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(cookie ? { Cookie: cookie } : {}) },
@@ -30,6 +30,11 @@ function client() {
     const data = (res.headers.get('content-type') || '').includes('json') ? await res.json() : await res.text();
     return { status: res.status, data };
   };
+  // Rohdaten (z. B. Bilder) mit derselben Sitzung senden
+  c.raw = (method, url, body) => fetch(base + url, {
+    method, headers: { ...(cookie ? { Cookie: cookie } : {}), ...(body ? { 'Content-Type': 'application/octet-stream' } : {}) }, body,
+  });
+  return c;
 }
 async function login(c, username, password) {
   const r = await c('POST', '/api/login', { username, password });
@@ -137,4 +142,56 @@ test('Nach dem Austrittsdatum ist keine Anmeldung möglich', async () => {
   assert.equal((await client()('POST', '/api/login', { username: 'lhoffmann', password: 'demo123' })).status, 401);
   await haupt('PUT', `/api/users/${lena.id}`, { austritt: day(30) });
   assert.equal((await client()('POST', '/api/login', { username: 'lhoffmann', password: 'demo123' })).status, 200);
+});
+
+test('Stationen anlegen, umbenennen, Mindestbesetzung übernehmen', async () => {
+  let r = await haupt('POST', '/api/units', { name: 'Station 3 – Gerontopsychiatrie', kuerzel: 'G3', telefon: '0231 4503-0', copy_from: 1 });
+  assert.equal(r.status, 200);
+  assert.ok(r.data.kopiert > 0); // Mindestbesetzung von Station 1 übernommen
+  const id = r.data.id;
+  assert.equal((await haupt('POST', '/api/units', { name: 'station 3 – gerontopsychiatrie' })).status, 409); // doppelt
+  assert.equal((await haupt('POST', '/api/units', { name: '  ' })).status, 400);
+  r = await haupt('PUT', `/api/units/${id}`, { name: 'Station G3', leitung_id: 2 });
+  assert.equal(r.data.name, 'Station G3');
+  assert.equal(r.data.kuerzel, 'G3'); // unverändert
+  assert.ok(r.data.leitung_name);
+  const reqs = (await haupt('GET', '/api/requirements')).data.filter((x) => x.unit_id === id);
+  assert.ok(reqs.length > 0);
+  // Mitarbeitende dürfen Stationen sehen, aber nicht ändern
+  const c = client();
+  await login(c, 'kschulz', 'demo123');
+  assert.equal((await c('GET', '/api/units')).status, 200);
+  assert.equal((await c('POST', '/api/units', { name: 'X' })).status, 403);
+  // löschen geht ohne Schichten; mit Schichten nur deaktivieren
+  assert.equal((await haupt('DELETE', `/api/units/${id}`)).status, 200);
+  await haupt('POST', '/api/shifts/generate', { from: day(5), to: day(5), unit_ids: [1] });
+  assert.equal((await haupt('DELETE', '/api/units/1')).data.code, 'HAS_SHIFTS');
+});
+
+test('Profilfoto hochladen, anzeigen, entfernen', async () => {
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const c = client();
+  await login(c, 'jschmitz', 'demo123');
+  const users = (await haupt('GET', '/api/users')).data;
+  const tobias = users.find((u) => u.username === 'twagner');
+  let res = await haupt.raw('POST', `/api/users/${tobias.id}/foto`, Buffer.from('<html>'));
+  assert.equal(res.status, 400);
+  res = await haupt.raw('POST', `/api/users/${tobias.id}/foto`, png);
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.ok(data.foto_version > 0);
+  // Kollegin sieht das Foto (angemeldet), ohne Anmeldung nicht
+  res = await c.raw('GET', `/api/users/${tobias.id}/foto`);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'image/png');
+  assert.equal((await fetch(`${base}/api/users/${tobias.id}/foto`)).status, 401);
+  // eigenes Foto über „Mein Profil“
+  res = await c.raw('POST', '/api/me/foto', png);
+  assert.equal(res.status, 200);
+  // Mitarbeitende können fremde Fotos nicht ändern
+  res = await c.raw('POST', `/api/users/${tobias.id}/foto`, png);
+  assert.equal(res.status, 403);
+  // entfernen
+  assert.equal((await haupt('DELETE', `/api/users/${tobias.id}/foto`)).data.foto_version, 0);
+  assert.equal((await c.raw('GET', `/api/users/${tobias.id}/foto`)).status, 404);
 });

@@ -238,6 +238,10 @@ function migrate(db) {
   add('users', 'stufe INTEGER');
   add('users', 'stammbereich_id INTEGER');
   add('users', "admin_rechte TEXT NOT NULL DEFAULT 'keine'");
+  add('users', 'foto_version INTEGER NOT NULL DEFAULT 0');
+  add('units', "kuerzel TEXT NOT NULL DEFAULT ''");
+  add('units', "telefon TEXT NOT NULL DEFAULT ''");
+  add('units', 'leitung_id INTEGER');
   // Abwesenheitsarten erweitern (CHECK-Bedingung erfordert Neuaufbau der Tabelle)
   const absSql = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'absences'").get()?.sql || '';
   if (!absSql.includes('zusatzurlaub')) {

@@ -136,7 +136,7 @@ function createApp(db, opts = {}) {
     urlaubstage_jahr: u.urlaubstage_jahr, schwerbehindert: !!u.schwerbehindert, zusatzurlaub_tage: u.zusatzurlaub_tage,
     personalnummer: u.personalnummer, email: u.email, telefon: u.telefon, eintritt: u.eintritt, austritt: u.austritt,
     befristet_bis: u.befristet_bis, entgeltgruppe: u.entgeltgruppe, stufe: u.stufe, stammbereich_id: u.stammbereich_id,
-    bemerkung: u.bemerkung, admin_rechte: u.admin_rechte || 'keine', admin_bis: u.admin_bis,
+    bemerkung: u.bemerkung, foto_version: u.foto_version || 0, admin_rechte: u.admin_rechte || 'keine', admin_bis: u.admin_bis,
     is_manager: hasMgr(u), is_haupt: isHaupt(u),
     totp_enabled: !!u.totp_enabled, locked: u.locked_until > Date.now(), recovery_left: JSON.parse(u.recovery_codes || '[]').length,
   });
@@ -449,23 +449,98 @@ function createApp(db, opts = {}) {
   }));
 
   // ---------- Bereiche / Stationen ----------
-  app.get('/api/units', auth, wrap(() => db.prepare('SELECT * FROM units ORDER BY active DESC, name').all()));
+  const loadUnits = () => db.prepare(`SELECT un.*, l.name AS leitung_name,
+      (SELECT COUNT(*) FROM users x WHERE x.stammbereich_id = un.id AND x.active = 1) AS personal
+    FROM units un LEFT JOIN users l ON l.id = un.leitung_id ORDER BY un.active DESC, un.name`).all();
+  const unitFields = (b, cur = {}) => {
+    const v = { ...cur, ...b };
+    const name = String(v.name ?? '').trim().slice(0, 80);
+    if (!name) throw new HttpError(400, 'Bitte einen Namen für die Station angeben.');
+    const dup = db.prepare('SELECT id FROM units WHERE lower(name) = lower(?) AND id <> ?').get(name, cur.id || 0);
+    if (dup) throw new HttpError(409, 'Eine Station mit diesem Namen gibt es schon.');
+    const leitung = v.leitung_id ? Number(v.leitung_id) : null;
+    if (leitung !== null && !db.prepare('SELECT 1 FROM users WHERE id = ?').get(leitung)) throw new HttpError(400, 'Stationsleitung nicht gefunden.');
+    return {
+      name, kuerzel: String(v.kuerzel ?? '').trim().slice(0, 10), telefon: String(v.telefon ?? '').trim().slice(0, 40),
+      leitung_id: leitung, active: v.active === undefined ? 1 : (v.active ? 1 : 0),
+    };
+  };
+  app.get('/api/units', auth, wrap(() => loadUnits()));
   app.post('/api/units', auth, manager, wrap((req) => {
-    const name = String(req.body?.name || '').trim();
-    if (!name) throw new HttpError(400, 'Name fehlt.');
-    const id = db.prepare('INSERT INTO units (name) VALUES (?)').run(name).lastInsertRowid;
-    return db.prepare('SELECT * FROM units WHERE id = ?').get(id);
+    const f = unitFields(req.body || {});
+    const id = db.prepare('INSERT INTO units (name, kuerzel, telefon, leitung_id, active) VALUES (?, ?, ?, ?, ?)')
+      .run(f.name, f.kuerzel, f.telefon, f.leitung_id, f.active).lastInsertRowid;
+    // Mindestbesetzung von einer bestehenden Station übernehmen
+    let kopiert = 0;
+    if (req.body.copy_from) {
+      kopiert = Number(db.prepare(`INSERT INTO requirements (unit_id, shift_type_id, weekday, min_staff, max_staff)
+        SELECT ?, shift_type_id, weekday, min_staff, max_staff FROM requirements WHERE unit_id = ?`).run(id, Number(req.body.copy_from)).changes);
+      db.prepare(`INSERT INTO qual_rules (unit_id, shift_type_id, qualification, min_count)
+        SELECT ?, shift_type_id, qualification, min_count FROM qual_rules WHERE unit_id = ?`).run(id, Number(req.body.copy_from));
+    }
+    audit(req.user.id, 'unit.create', { id, ...f, kopiert });
+    return { ...loadUnits().find((u) => u.id === id), kopiert };
   }));
   app.put('/api/units/:id', auth, manager, wrap((req) => {
     const id = Number(req.params.id);
-    const u = db.prepare('SELECT * FROM units WHERE id = ?').get(id);
-    if (!u) throw new HttpError(404, 'Nicht gefunden.');
-    const name = 'name' in req.body ? String(req.body.name).trim() : u.name;
-    if (!name) throw new HttpError(400, 'Name fehlt.');
-    const active = 'active' in req.body ? (req.body.active ? 1 : 0) : u.active;
-    db.prepare('UPDATE units SET name = ?, active = ? WHERE id = ?').run(name, active, id);
-    return db.prepare('SELECT * FROM units WHERE id = ?').get(id);
+    const cur = db.prepare('SELECT * FROM units WHERE id = ?').get(id);
+    if (!cur) throw new HttpError(404, 'Station nicht gefunden.');
+    const f = unitFields(req.body || {}, cur);
+    db.prepare('UPDATE units SET name = ?, kuerzel = ?, telefon = ?, leitung_id = ?, active = ? WHERE id = ?')
+      .run(f.name, f.kuerzel, f.telefon, f.leitung_id, f.active, id);
+    audit(req.user.id, 'unit.update', { id, ...f, alt: cur.name });
+    return loadUnits().find((u) => u.id === id);
   }));
+  app.delete('/api/units/:id', auth, manager, wrap((req) => {
+    const id = Number(req.params.id);
+    const n = db.prepare('SELECT COUNT(*) AS n FROM shifts WHERE unit_id = ?').get(id).n;
+    if (n > 0) throw new HttpError(409, `Für diese Station gibt es ${n} Schichten. Bitte stattdessen deaktivieren.`, 'HAS_SHIFTS');
+    db.prepare('UPDATE users SET stammbereich_id = NULL WHERE stammbereich_id = ?').run(id);
+    db.prepare('DELETE FROM units WHERE id = ?').run(id);
+    audit(req.user.id, 'unit.delete', { id });
+    return { ok: true };
+  }));
+
+  // ---------- Profilfotos ----------
+  const FOTO_DIR = () => path.join(uploadDir, 'fotos');
+  const fotoPath = (id) => path.join(FOTO_DIR(), `${Number(id)}.img`);
+  const saveFoto = (req, userId) => {
+    const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    const mime = sniffMime(buf);
+    if (mime !== 'image/jpeg' && mime !== 'image/png') throw new HttpError(400, 'Bitte ein Foto als JPG oder PNG hochladen.');
+    fs.mkdirSync(FOTO_DIR(), { recursive: true });
+    fs.writeFileSync(fotoPath(userId), buf, { mode: 0o600 });
+    db.prepare('UPDATE users SET foto_version = ? WHERE id = ?').run(Date.now(), userId);
+    audit(req.user.id, 'foto.upload', { user_id: userId, size: buf.length });
+    return publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(userId));
+  };
+  const deleteFoto = (req, userId) => {
+    fs.rmSync(fotoPath(userId), { force: true });
+    db.prepare('UPDATE users SET foto_version = 0 WHERE id = ?').run(userId);
+    audit(req.user.id, 'foto.delete', { user_id: userId });
+    return publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(userId));
+  };
+  const rawFoto = express.raw({ type: () => true, limit: 5 * 1024 * 1024 });
+  app.post('/api/me/foto', auth, rawFoto, wrap((req) => saveFoto(req, req.user.id)));
+  app.delete('/api/me/foto', auth, wrap((req) => deleteFoto(req, req.user.id)));
+  const fotoTarget = (req) => {
+    const t = db.prepare('SELECT * FROM users WHERE id = ?').get(Number(req.params.id));
+    if (!t) throw new HttpError(404, 'Nicht gefunden.');
+    if (!isHaupt(req.user) && t.id !== req.user.id && isPrivileged(t)) throw new HttpError(403, 'Andere Verwalter/innen kann nur die Hauptverwaltung bearbeiten.');
+    return t;
+  };
+  app.post('/api/users/:id/foto', auth, manager, rawFoto, wrap((req) => saveFoto(req, fotoTarget(req).id)));
+  app.delete('/api/users/:id/foto', auth, manager, wrap((req) => deleteFoto(req, fotoTarget(req).id)));
+  // Fotos sehen nur angemeldete Kolleginnen und Kollegen (z. B. im Dienstplan)
+  app.get('/api/users/:id/foto', auth, (req, res, next) => {
+    const file = fotoPath(req.params.id);
+    if (!fs.existsSync(file)) return next(new HttpError(404, 'Kein Foto.'));
+    const head = fs.readFileSync(file).subarray(0, 8);
+    res.setHeader('Content-Type', head[0] === 0x89 ? 'image/png' : 'image/jpeg');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    return res.sendFile(file);
+  });
 
   // ---------- Schichtarten (Dienstzeiten) ----------
   app.get('/api/shift-types', auth, wrap(() => db.prepare('SELECT * FROM shift_types ORDER BY active DESC, start_time').all()));
@@ -624,10 +699,10 @@ function createApp(db, opts = {}) {
       WHERE ${where} ORDER BY s.date, s.start_time, u.name`).all(...params);
     if (!shifts.length) return [];
     const ids = shifts.map((s) => s.id);
-    const assigned = db.prepare(`SELECT a.shift_id, us.id AS user_id, us.name, us.qualification FROM assignments a
+    const assigned = db.prepare(`SELECT a.shift_id, us.id AS user_id, us.name, us.qualification, us.foto_version FROM assignments a
       JOIN users us ON us.id = a.user_id WHERE a.shift_id IN (${ids.map(() => '?').join(',')}) ORDER BY us.name`).all(...ids);
     const byShift = new Map(ids.map((id) => [id, []]));
-    for (const a of assigned) byShift.get(a.shift_id).push({ user_id: a.user_id, name: a.name, qualification: a.qualification });
+    for (const a of assigned) byShift.get(a.shift_id).push({ user_id: a.user_id, name: a.name, qualification: a.qualification, foto_version: a.foto_version });
     const rules = loadRules();
     return shifts.map((s) => {
       const list = byShift.get(s.id);
@@ -778,7 +853,7 @@ function createApp(db, opts = {}) {
   app.get('/api/log', auth, manager, wrap((req) => {
     const limit = Math.min(Number(req.query.limit) || 200, 1000);
     const rows = db.prepare(`SELECT * FROM audit_log WHERE action IN ('assignment.add','assignment.remove','absence.create','absence.decide',
-      'absence.update','absence.delete','attachment.upload','user.rights','user.create') ORDER BY id DESC LIMIT ?`).all(limit);
+      'absence.update','absence.delete','attachment.upload','user.rights','user.create','unit.create','unit.update','unit.delete') ORDER BY id DESC LIMIT ?`).all(limit);
     const userName = new Map(db.prepare('SELECT id, name FROM users').all().map((u) => [u.id, u.name]));
     const shiftInfo = db.prepare(`SELECT s.date, st.code, u.name AS unit_name FROM shifts s JOIN shift_types st ON st.id = s.shift_type_id
       JOIN units u ON u.id = s.unit_id WHERE s.id = ?`);

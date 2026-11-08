@@ -53,6 +53,7 @@ input[type="color"] { width: 4em; height: 2.4em; padding: 2px; }
 #tabs button { background: transparent; color: var(--text); border: 0; padding: .4rem .7rem; border-radius: var(--radius); }
 #tabs button.active { background: var(--primary); color: var(--primary-ink); }
 .who { display: flex; align-items: center; gap: .5rem; font-size: .9rem; }
+.who #who { display: inline-flex; }
 
 main { padding: 1rem; max-width: 1500px; margin: 0 auto; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem; margin-bottom: 1rem; }
@@ -143,6 +144,17 @@ legend { font-weight: 600; font-size: .9rem; padding: 0 .3rem; }
 .akte-head { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
 .akte-contact { display: flex; flex-direction: column; gap: .3rem; }
 .akte-contact a { color: var(--primary); text-decoration: none; }
+.avatar { border-radius: 50%; object-fit: cover; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; background: var(--line); }
+.avatar-initials { background: color-mix(in srgb, var(--primary) 18%, var(--card)); color: var(--primary); font-weight: 700; letter-spacing: .02em; }
+.person { display: inline-flex; align-items: center; gap: .4rem; }
+.cell li .person { gap: .3rem; }
+.foto-control { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+.foto-control button { margin-right: .4rem; }
+.akte-head { align-items: center; }
+.akte-main { flex: 1; min-width: 220px; }
+.akte-foto .foto-control p { display: none; }
+.station-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: .5rem; }
+.station-head h3 { margin: 0 0 .5rem; }
 #toast { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: .6rem 1rem; border-radius: var(--radius); opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; z-index: 20; }
 #toast.show { opacity: 1; }
 #toast.err { background: var(--bad); color: #fff; }

@@ -137,12 +137,13 @@ const VIEWS = {
   konto: { label: 'Stundenkonto', render: renderKonto, staff: true },
   generate: { label: 'Plan erzeugen', render: renderGenerate, mgr: true },
   staff: { label: 'Personal', render: renderStaff, mgr: true },
+  stationen: { label: 'Stationen', render: renderStations, mgr: true },
   types: { label: 'Dienstzeiten', render: renderShiftTypes, mgr: true },
   req: { label: 'Mindestbesetzung', render: renderRequirements, mgr: true },
   report: { label: 'Auswertung TVöD', render: renderReport, mgr: true },
   log: { label: 'Protokoll', render: renderLog, mgr: true },
   settings: { label: 'Einstellungen', render: renderSettings, mgr: true },
-  account: { label: 'Sicherheit', render: renderAccount },
+  account: { label: 'Mein Profil', render: renderAccount },
 };
 
 function renderTabs() {
@@ -183,9 +184,7 @@ async function boot() {
   }
   document.getElementById('topbar').hidden = false;
   applyBranding();
-  const rolle = state.me.is_haupt ? 'Hauptverwaltung' : state.me.admin_rechte === 'vertretung' && isMgr() ? `Vertretung bis ${fmtDate(state.me.admin_bis)}`
-    : isMgr() ? 'Verwaltung' : 'Mitarbeiter/in';
-  document.getElementById('who').textContent = `${state.me.name} (${rolle})`;
+  renderWho();
   state.weekStart = state.weekStart || mondayOf(todayIso());
   state.month = state.month || todayIso().slice(0, 7);
   const fromHash = location.hash.slice(1);
@@ -339,7 +338,7 @@ function renderCell(s, staffUsers) {
   const mine = s.assigned.some((a) => a.user_id === state.me.id);
 
   const list = h('ul', {}, s.assigned.map((a) => h('li', { class: a.user_id === state.me.id ? 'me' : '', title: a.qualification },
-    a.name,
+    h('span', { class: 'person' }, avatar(a, 20), a.name),
     isMgr() ? h('button', { class: 'tiny danger', title: 'Austragen', onclick: () => unassign(s, a.user_id, a.name) }, '×') : null)));
 
   const count = h('div', { class: 'count' },
@@ -540,6 +539,128 @@ async function renderGenerate() {
     }, 'Schichten erzeugen'))));
 }
 
+// ---------- Profilfotos ----------
+/** Rundes Foto oder Initialen */
+function avatar(u, size = 32) {
+  const initials = String(u?.name || '?').split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+  const id = u?.id ?? u?.user_id;
+  const style = { width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.4)}px` };
+  if (u && u.foto_version) {
+    return h('img', { class: 'avatar', src: `api/users/${id}/foto?v=${u.foto_version}`, alt: '', loading: 'lazy', style });
+  }
+  return h('span', { class: 'avatar avatar-initials', 'aria-hidden': 'true', style }, initials);
+}
+
+/**
+ * Foto im Browser verkleinern (max. 512 px, JPEG). Spart Datenvolumen und entfernt
+ * eingebettete Metadaten wie den Aufnahmeort (GPS).
+ */
+async function resizeImage(file, max = 512) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = () => reject(new Error('Das Bild konnte nicht gelesen werden. Bitte JPG oder PNG verwenden.'));
+      i.src = url;
+    });
+    // quadratisch zuschneiden (Mitte), dann verkleinern
+    const side = Math.min(img.naturalWidth, img.naturalHeight);
+    const size = Math.min(max, side);
+    const canvas = document.createElement('canvas');
+    canvas.width = size; canvas.height = size;
+    canvas.getContext('2d').drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, size, size);
+    return await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** Foto-Bereich mit Hochladen / Entfernen; url = 'api/me/foto' oder 'api/users/<id>/foto' */
+function fotoControl(u, url, onDone) {
+  const input = h('input', { type: 'file', accept: 'image/*', hidden: true });
+  input.addEventListener('change', async () => {
+    const file = input.files[0];
+    if (!file) return;
+    try {
+      const blob = await resizeImage(file);
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: blob });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast('Foto gespeichert.');
+      onDone(data);
+    } catch (e) { toast(e.message, true); }
+  });
+  return h('div', { class: 'foto-control' }, avatar(u, 96),
+    h('div', {}, input,
+      h('button', { type: 'button', onclick: () => input.click() }, u.foto_version ? 'Foto ändern' : 'Foto hochladen'),
+      u.foto_version ? h('button', { type: 'button', class: 'ghost', onclick: async () => {
+        if (!confirm('Foto entfernen?')) return;
+        try { onDone(await api('DELETE', url)); toast('Foto entfernt.'); } catch (e) { toast(e.message, true); }
+      } }, 'Entfernen') : null,
+      h('p', { class: 'small muted' }, 'Freiwillig. Das Foto sehen nur angemeldete Kolleginnen und Kollegen, z. B. im Dienstplan. ',
+        'Auf dem Handy können Sie direkt die Kamera nutzen.')));
+}
+
+// ---------- Stationen (Verwaltung) ----------
+async function renderStations() {
+  const [units, users, types] = await Promise.all([api('GET', 'api/units'), api('GET', 'api/users'), api('GET', 'api/shift-types')]);
+  const people = users.filter((u) => u.active).sort((a, b) => a.name.localeCompare(b.name, 'de'));
+  const leitungSelect = (cur) => h('select', {}, h('option', { value: '' }, '– keine –'),
+    people.map((p) => h('option', { value: p.id, selected: p.id === cur }, `${p.name}${p.qualification ? ` (${p.qualification})` : ''}`)));
+
+  const unitCard = (u) => {
+    const name = h('input', { value: u.name, maxlength: 80, required: true });
+    const kuerzel = h('input', { value: u.kuerzel || '', maxlength: 10, placeholder: 'z. B. 1A', style: { width: '7em' } });
+    const telefon = h('input', { type: 'tel', value: u.telefon || '', maxlength: 40, placeholder: 'Durchwahl' });
+    const leitung = leitungSelect(u.leitung_id);
+    const active = h('input', { type: 'checkbox', checked: !!u.active });
+    return h('div', { class: `card station${u.active ? '' : ' inactive'}` },
+      h('div', { class: 'station-head' }, h('h3', {}, u.kuerzel ? `${u.name} (${u.kuerzel})` : u.name),
+        h('span', { class: 'muted small' }, `${u.personal} Person(en) mit Stammbereich`, u.leitung_name ? ` · Leitung: ${u.leitung_name}` : '')),
+      h('div', { class: 'row' }, h('label', {}, 'Name', name), h('label', {}, 'Kürzel', kuerzel), h('label', {}, 'Telefon', telefon),
+        h('label', {}, 'Stationsleitung', leitung), h('label', { class: 'check', style: { alignSelf: 'center' } }, active, 'aktiv')),
+      h('div', { class: 'toolbar' },
+        h('button', { onclick: async () => {
+          try {
+            await api('PUT', `api/units/${u.id}`, { name: name.value, kuerzel: kuerzel.value, telefon: telefon.value, leitung_id: leitung.value || null, active: active.checked });
+            toast('Station gespeichert.'); renderStations();
+          } catch (e) { toast(e.message, true); }
+        } }, 'Speichern'),
+        h('button', { class: 'ghost', onclick: () => go('req') }, 'Mindestbesetzung'),
+        h('button', { class: 'danger', onclick: async () => {
+          if (!confirm(`Station „${u.name}“ löschen?`)) return;
+          try { await api('DELETE', `api/units/${u.id}`); toast('Gelöscht.'); renderStations(); } catch (e) { toast(e.message, true); }
+        } }, 'Löschen')));
+  };
+
+  // neue Station
+  const nName = h('input', { maxlength: 80, required: true, placeholder: 'z. B. Station 3 – Allgemeinpsychiatrie' });
+  const nKuerzel = h('input', { maxlength: 10, placeholder: 'z. B. 3', style: { width: '7em' } });
+  const nTel = h('input', { type: 'tel', maxlength: 40, placeholder: 'Durchwahl' });
+  const nLeitung = leitungSelect(null);
+  const nCopy = h('select', {}, h('option', { value: '' }, 'nein, später selbst festlegen'),
+    units.filter((u) => u.active).map((u) => h('option', { value: u.id }, `wie ${u.name}`)));
+  const newForm = h('form', { class: 'card' }, h('h2', {}, 'Neue Station anlegen'),
+    h('div', { class: 'row' }, h('label', {}, 'Name', nName), h('label', {}, 'Kürzel', nKuerzel), h('label', {}, 'Telefon', nTel),
+      h('label', {}, 'Stationsleitung', nLeitung), h('label', {}, 'Mindestbesetzung übernehmen?', nCopy)),
+    h('div', { class: 'toolbar' }, h('button', { type: 'submit' }, 'Station anlegen')),
+    types.length ? null : h('p', { class: 'small muted' }, 'Tipp: Legen Sie unter „Dienstzeiten“ auch die Dienste (Früh, Spät, Nacht) an.'));
+  newForm.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    try {
+      const r = await api('POST', 'api/units', { name: nName.value, kuerzel: nKuerzel.value, telefon: nTel.value, leitung_id: nLeitung.value || null, copy_from: nCopy.value || null });
+      toast(r.kopiert ? `Station angelegt, Mindestbesetzung übernommen.` : 'Station angelegt. Bitte noch die Mindestbesetzung festlegen.');
+      renderStations();
+    } catch (e) { toast(e.message, true); }
+  });
+
+  setMain(h('div', { class: 'card' }, h('h2', { style: { margin: 0 } }, `Stationen (${units.filter((u) => u.active).length} aktiv)`),
+    h('p', { class: 'small muted' }, 'Stationen bzw. Bereiche anlegen und umbenennen. Die Namen erscheinen im Dienstplan, in der Personalakte (Stammbereich) und in den Auswertungen. ',
+      'Nicht mehr benötigte Stationen bitte deaktivieren; löschen geht nur, solange noch keine Schichten angelegt sind.')),
+  newForm, units.map(unitCard));
+}
+
 // ---------- Personalverwaltung (Verwaltung) ----------
 const RECHTE_LABEL = { keine: '', voll: 'Verwalter/in', vertretung: 'Vertretung' };
 function rechteBadge(u) {
@@ -592,7 +713,7 @@ async function renderStaff() {
     count.textContent = `${list.length} von ${users.length} Personen`;
     tbody.replaceChildren(...list.map((u) => h('tr', { class: `clickable${u.active ? '' : ' inactive'}`, onclick: () => renderPersonalakte(u.id) },
       h('td', {}, u.personalnummer || '–'),
-      h('td', {}, h('strong', {}, u.name), h('div', { class: 'small muted' }, u.username)),
+      h('td', {}, h('div', { class: 'person' }, avatar(u, 32), h('div', {}, h('strong', {}, u.name), h('div', { class: 'small muted' }, u.username)))),
       h('td', {}, u.qualification || '–'),
       h('td', {}, unitName.get(u.stammbereich_id) || '–'),
       h('td', { class: 'num' }, fmtNum(u.weekly_hours)),
@@ -643,7 +764,8 @@ async function renderPersonalakte(id) {
   ]);
   const r = report?.rows?.[0];
   const head = h('div', { class: 'card akte-head' },
-    h('div', {}, h('h2', { style: { margin: 0 } }, u.name),
+    h('div', { class: 'akte-foto' }, fotoControl(u, `api/users/${u.id}/foto`, () => renderPersonalakte(u.id))),
+    h('div', { class: 'akte-main' }, h('h2', { style: { margin: 0 } }, u.name),
       h('div', { class: 'muted' }, [u.qualification, units.find((x) => x.id === u.stammbereich_id)?.name, u.personalnummer && `Pers.-Nr. ${u.personalnummer}`]
         .filter(Boolean).join(' · ') || '–'),
       h('div', { class: 'badges' }, rechteBadge(u), vertragHinweis(u), !u.active ? h('span', { class: 'badge bad' }, 'inaktiv') : null,
@@ -811,25 +933,13 @@ async function renderShiftTypes() {
       h('td', { class: 'num' }, t ? fmtNum(hoursOf(t)) : ''), h('td', {}, h('button', { class: 'tiny', onclick: save }, t ? 'Speichern' : 'Hinzufügen')));
   };
 
-  const unitRow = (u) => {
-    const name = h('input', { value: u?.name || '', placeholder: 'z. B. Station 3' });
-    const active = h('input', { type: 'checkbox', checked: u ? !!u.active : true });
-    return h('tr', { class: u && !u.active ? 'inactive' : '' }, h('td', {}, name), h('td', {}, active),
-      h('td', {}, h('button', {
-        class: 'tiny', onclick: async () => {
-          try { await api(u ? 'PUT' : 'POST', u ? `api/units/${u.id}` : 'api/units', { name: name.value, active: active.checked }); toast('Gespeichert.'); renderShiftTypes(); } catch (e) { toast(e.message, true); }
-        },
-      }, u ? 'Speichern' : 'Hinzufügen')));
-  };
-
   setMain(
     h('div', { class: 'card' }, h('h2', {}, 'Dienstzeiten (Schichtarten)'),
       h('p', { class: 'muted small' }, 'Endet ein Dienst vor seinem Beginn (z. B. 21:30–06:30), geht er über Mitternacht. Die Pause wird nicht als Arbeitszeit angerechnet.'),
       h('div', { class: 'table-wrap' }, h('table', {},
         h('thead', {}, h('tr', {}, ['Bezeichnung', 'Kürzel', 'Beginn', 'Ende', 'Pause (Min.)', 'Farbe', 'Aktiv', 'Std.', ''].map((x) => h('th', {}, x)))),
         h('tbody', {}, types.map(typeRow), typeRow(null))))),
-    h('div', { class: 'card' }, h('h2', {}, 'Bereiche / Stationen'),
-      h('table', {}, h('thead', {}, h('tr', {}, ['Name', 'Aktiv', ''].map((x) => h('th', {}, x)))), h('tbody', {}, units.map(unitRow), unitRow(null)))));
+    h('p', { class: 'small muted' }, 'Stationen legen Sie unter ', h('a', { href: '#stationen', onclick: (e) => { e.preventDefault(); go('stationen'); } }, 'Stationen'), ' an.'));
 }
 
 function hoursOf(t) {
@@ -1342,6 +1452,17 @@ function showRecoveryCodes(codes, onDone) {
 }
 
 // ---------- Sicherheit: Passwort und 2FA ----------
+async function refreshMe() {
+  const { user } = await api('GET', 'api/me');
+  state.me = user;
+  renderWho();
+}
+function renderWho() {
+  const rolle = state.me.is_haupt ? 'Hauptverwaltung' : state.me.admin_rechte === 'vertretung' && isMgr() ? `Vertretung bis ${fmtDate(state.me.admin_bis)}`
+    : isMgr() ? 'Verwaltung' : 'Mitarbeiter/in';
+  document.getElementById('who').replaceChildren(h('span', { class: 'person' }, avatar(state.me, 26), `${state.me.name} (${rolle})`));
+}
+
 async function renderAccount() {
   const { user, settings } = await api('GET', 'api/me');
   state.me = user; state.settings = settings;
@@ -1377,7 +1498,9 @@ async function renderAccount() {
           } }, 'Deaktivieren') : null)]
       : [h('p', {}, h('span', { class: 'badge warn' }, 'nicht eingerichtet')),
         h('p', {}, h('button', { onclick: () => renderSetup(true) }, 'Jetzt einrichten'))]);
-  setMain(form, twofa);
+  const profil = h('div', { class: 'card', style: { maxWidth: '480px' } }, h('h2', {}, 'Mein Foto'),
+    fotoControl(user, 'api/me/foto', async () => { await refreshMe(); renderAccount(); }));
+  setMain(profil, form, twofa);
 }
 
 // Als App installierbar (Startbildschirm); der Service Worker speichert nur die Programmdateien, keine Personaldaten

@@ -7,7 +7,7 @@ Arbeitszeit wird angelehnt an den **TVöD (BT-K)** angerechnet.
 
 **Einsatzplanung (Manager)**
 - **Dienstzeiten** festlegen (z. B. Früh-, Spät- und Nachtdienst) mit Beginn, Ende und Pause, auch über Mitternacht
-- **Bereiche/Stationen** verwalten
+- **Stationen** anlegen, umbenennen, deaktivieren, mit Kürzel, Telefon und Stationsleitung; Mindestbesetzung beim Anlegen von einer anderen Station übernehmen. Bisher hieß das „Bereiche/Stationen verwalten“
 - **Mindestbesetzung** (und optionale Höchstbesetzung) je Station, Dienst und Wochentag festlegen
 - **Mindestbesetzung nach Qualifikation**, z. B. „in jedem Dienst mindestens 1 Pflegefachkraft“, wahlweise je Station und/oder Dienst
 - **Qualifikationen** frei konfigurierbar (Einstellungen)
@@ -36,6 +36,11 @@ Arbeitszeit wird angelehnt an den **TVöD (BT-K)** angerechnet.
 - **Krank melden** und Krankmeldung verlängern; ab dem eingestellten Krankheitstag (Standard: 4. Tag, EFZG § 5) wird die **AU-Bescheinigung hochgeladen** (PDF, JPG oder PNG, max. 10 MB, auch als Handyfoto)
 - **Meine Dienste:** Übersicht der kommenden Dienste
 - **Stundenkonto:** Soll/Ist, Fortschritt zur Mindestverfügbarkeit, Zuschläge
+
+**Profilfoto**
+- Jede Person kann unter **„Mein Profil“** freiwillig ein Foto hochladen, auf dem Handy direkt mit der Kamera; die Verwaltung kann es in der Personalakte setzen oder entfernen
+- Das Foto wird im Browser quadratisch zugeschnitten und auf 512 px verkleinert; Metadaten wie der Aufnahmeort werden dabei entfernt
+- Sichtbar nur für angemeldete Kolleginnen und Kollegen (Dienstplan, Personalliste, Personalakte)
 
 **Auf dem privaten Handy**
 - Die Oberfläche passt sich an das Handy an: Dienstplan als **Tagesansicht** mit Wochenleiste (grüner Punkt = eigener Dienst, roter Punkt = Lücke), große Schaltflächen, Listen als Karten
