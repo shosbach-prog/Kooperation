@@ -104,6 +104,19 @@ Halten Sie dafür ein Handy mit Authenticator-App bereit.
 
 Die Passwörter bitte **vor jedem echten Einsatz ändern**.
 
+### Kostenlos online stellen
+
+Eine Schritt-für-Schritt-Anleitung für einen kostenlosen Server in Frankfurt (Oracle Cloud Always Free,
+DuckDNS, automatisches HTTPS, tägliche Sicherung) steht in **[deploy/ANLEITUNG.md](deploy/ANLEITUNG.md)**.
+Kurzfassung mit Docker:
+
+```bash
+cd deploy && cp .env.beispiel .env   # DOMAIN und MANAGER_PASSWORD eintragen
+docker compose up -d --build
+```
+
+Datensicherung: `npm run backup` bzw. im Container `docker compose exec app node scripts/backup.js`.
+
 ### Betrieb im Kliniknetz und Zugriff vom privaten Handy
 
 Damit die Kolleginnen und Kollegen vom privaten Handy zugreifen können, muss die Anwendung **aus dem Internet erreichbar** sein

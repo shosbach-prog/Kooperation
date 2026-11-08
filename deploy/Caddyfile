@@ -1,0 +1,16 @@
+# Caddy holt das HTTPS-Zertifikat automatisch (Let's Encrypt).
+{$DOMAIN} {
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "same-origin"
+		Permissions-Policy "geolocation=(), microphone=()"
+		-Server
+	}
+	request_body {
+		max_size 12MB
+	}
+	reverse_proxy app:3000
+}

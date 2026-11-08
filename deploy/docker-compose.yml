@@ -1,0 +1,29 @@
+# Betrieb mit automatischem HTTPS (Caddy + Let's Encrypt)
+# Start:  docker compose up -d --build     (im Ordner deploy/)
+services:
+  app:
+    build: ..
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      COOKIE_SECURE: "1"
+    volumes:
+      - ./data:/data
+
+  caddy:
+    image: caddy:2.8
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file: .env
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "backup": "node scripts/backup.js"
   },
   "repository": {
     "type": "git",
