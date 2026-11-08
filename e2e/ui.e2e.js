@@ -143,3 +143,45 @@ test('Ablauf: Dialoge sind per Tastatur bedienbar und barrierefrei', { skip }, a
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+test('Passkey: einrichten im Profil, danach Anmeldung ohne Passwort und Code', { skip }, async () => {
+  // WebAuthn verlangt einen Domainnamen (keine IP-Adresse) → localhost
+  const host = url.replace('127.0.0.1', 'localhost');
+  const user = await H.loginState(browser, host, 'jschmitz', 'demo123');
+  const { ctx, page, errors } = await open(DEVICES().PC, user.state);
+  const cdp = await ctx.newCDPSession(page);
+  await cdp.send('WebAuthn.enable');
+  const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', {
+    options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
+  });
+  await page.goto(`${host}#account`);
+  await page.waitForSelector('text=Passkey auf diesem Gerät einrichten');
+  await page.click('text=Passkey auf diesem Gerät einrichten');
+  await page.fill('dialog[open] input', 'Test-Laptop');
+  await page.click('dialog[open] button[type=submit]');
+  await page.waitForSelector('.passkey-list >> text=Test-Laptop');
+  assert.equal((await cdp.send('WebAuthn.getCredentials', { authenticatorId })).credentials.length, 1);
+  assert.deepEqual(await H.axe(page), []);
+
+  // Abmelden und mit Passkey wieder anmelden
+  await page.click('#logout');
+  await page.waitForSelector('#login-form');
+  await page.click('text=Mit Passkey anmelden');
+  await page.waitForSelector('#tabs .nav-item');
+  const me = await page.evaluate(() => fetch('api/me').then((r) => r.json()));
+  assert.equal(me.user.username, 'jschmitz');
+
+  // Passkey entfernen → Anmeldung damit nicht mehr möglich
+  await page.goto(`${host}#account`);
+  await page.waitForSelector('.passkey-list');
+  await page.click('button[aria-label="Test-Laptop entfernen"]');
+  await page.click('dialog[open] button:has-text("Entfernen")');
+  await page.waitForSelector('text=Noch kein Passkey eingerichtet.');
+  await page.click('#logout');
+  await page.waitForSelector('#login-form');
+  await page.click('text=Mit Passkey anmelden');
+  await page.waitForSelector('#login-error:not(:empty)');
+  assert.match(await page.textContent('#login-error'), /nicht \(mehr\) eingerichtet/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});

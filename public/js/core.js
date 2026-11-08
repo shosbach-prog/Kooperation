@@ -34,7 +34,7 @@ async function api(method, url, body) {
   const isJson = (res.headers.get('content-type') || '').includes('json');
   const data = isJson ? await res.json() : await res.text();
   if (!res.ok) {
-    const authUrl = url.startsWith('api/login') || url.startsWith('api/2fa') || url === 'api/me';
+    const authUrl = url.startsWith('api/login') || url.startsWith('api/2fa') || url.startsWith('api/passkeys/login') || url === 'api/me';
     if (res.status === 401 && !authUrl) { state.me = null; renderLogin(); }
     const e = new Error((data && data.error) || res.statusText);
     e.code = data && data.code; e.status = res.status;

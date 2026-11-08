@@ -44,6 +44,8 @@ function renderLogin() {
   const node = document.getElementById('login-tpl').content.cloneNode(true);
   setMain(node);
   fillLoginBrand(main().querySelector('.login-brand'));
+  const pk = passkeyLoginButton();
+  if (pk) main().querySelector('#login-form').after(pk);
   main().querySelector('.login').append(legalLinks());
   const form = document.getElementById('login-form');
   form.addEventListener('submit', async (ev) => {

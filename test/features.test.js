@@ -633,3 +633,28 @@ test('Datenschutz: Impressum, Auskunft und Löschfristen', async () => {
   assert.equal((await mgr('POST', '/api/admin/cleanup')).data.au, 0);
   await mgr('PUT', '/api/settings', { loeschfrist_au_monate: 12 });
 });
+
+test('Passkeys: Schutz der Schnittstellen', async () => {
+  const anon = client();
+  assert.equal((await anon('POST', '/api/passkeys/register/options')).status, 401);
+  assert.equal((await anon('GET', '/api/passkeys')).status, 401);
+  // Anmeldeoptionen sind öffentlich, verlangen Benutzerverifikation (Biometrie/PIN)
+  const o = (await anon('POST', '/api/passkeys/login/options')).data;
+  assert.equal(o.options.userVerification, 'required');
+  assert.ok(o.id && o.options.challenge);
+  // unbekannter Schlüssel
+  let r = await anon('POST', '/api/passkeys/login/verify', { id: o.id, response: { id: 'gibt-es-nicht', type: 'public-key', response: {} } });
+  assert.equal(r.status, 401);
+  assert.equal(r.data.code, 'UNBEKANNT');
+  // Herausforderung nur einmal verwendbar
+  r = await anon('POST', '/api/passkeys/login/verify', { id: o.id, response: { id: 'x' } });
+  assert.equal(r.data.code, 'ABGELAUFEN');
+  // Registrierung: Optionen für angemeldete Person, ohne Biometrie-Pflicht keine Einrichtung
+  const lena = await as('lhoffmann');
+  const reg = (await lena('POST', '/api/passkeys/register/options')).data;
+  assert.equal(reg.authenticatorSelection.userVerification, 'required');
+  assert.equal(reg.user.name, 'lhoffmann');
+  assert.equal((await lena('POST', '/api/passkeys/register/verify', { response: { id: 'x', response: {} } })).status, 400);
+  assert.deepEqual((await lena('GET', '/api/passkeys')).data, []);
+  assert.equal((await lena('DELETE', '/api/passkeys/999')).status, 404);
+});

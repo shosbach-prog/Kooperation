@@ -99,7 +99,9 @@ function createApp(db, opts = {}) {
   const wrap = (fn) => (req, res, next) => {
     try {
       const out = fn(req, res);
-      if (out !== undefined && !res.headersSent) res.json(out);
+      const send = (v) => { if (v !== undefined && !res.headersSent) res.json(v); };
+      if (out && typeof out.then === 'function') out.then(send, next);
+      else send(out);
     } catch (e) { next(e); }
   };
 
@@ -462,6 +464,7 @@ function createApp(db, opts = {}) {
     if (req.body.reset_2fa) {
       db.prepare(`UPDATE users SET totp_secret = NULL, totp_pending = NULL, totp_enabled = 0, totp_last_counter = -1,
         recovery_codes = '[]', failed_logins = 0, locked_until = 0 WHERE id = ?`).run(id);
+      db.prepare('DELETE FROM passkeys WHERE user_id = ?').run(id); // verlorenes Handy: auch Passkeys entfernen
       db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
     }
     if (req.body.unlock) db.prepare('UPDATE users SET failed_logins = 0, locked_until = 0 WHERE id = ?').run(id);
@@ -1620,7 +1623,7 @@ function createApp(db, opts = {}) {
   const ctx = {
     db, T, TOTP, HttpError, auth, manager, wrap, audit, getSettings, isoDate, isTime, nowLocalMs, todayIso,
     hasMgr, isHaupt, publicUser, loadShifts, loadRules, qualMissing, verbundGroup, checkConflicts, absenceOn, uploadDir, express,
-    hooks, shiftLabel, managerIds, decorateAbsence, timers: opts.timers !== false, backupDir: opts.backupDir || null,
+    hooks, shiftLabel, managerIds, decorateAbsence, timers: opts.timers !== false, backupDir: opts.backupDir || null, startSession, checkLock, registerFail, resetFails,
     scopeOf, inScope, userInScope, requireUnit, requireUser, managerFull, arbzgCheck, report,
   };
   for (const name of fs.readdirSync(path.join(__dirname, 'routes')).filter((f) => f.endsWith('.js')).sort()) {

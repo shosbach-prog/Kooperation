@@ -460,3 +460,11 @@ dialog.ui-dialog::backdrop { background: rgba(10, 15, 20, .5); }
 @media (pointer: coarse) { button.tiny { min-height: 36px; } }
 /* Kontrast der Zusatzinfos auf rot markierten Schichten */
 .cell.bad .count, .cell.bad .verbund-info:not(.ok) { color: color-mix(in srgb, var(--muted) 60%, var(--text)); }
+
+/* Passkeys */
+.passkey-login { display: grid; gap: .5rem; margin-top: .8rem; text-align: center; }
+.passkey-login button { justify-content: center; display: inline-flex; align-items: center; gap: .4rem; }
+.oder { display: flex; align-items: center; gap: .6rem; color: var(--muted); font-size: .85rem; }
+.oder::before, .oder::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+.passkey-list { list-style: none; padding: 0; margin: .5rem 0 1rem; display: grid; gap: .5rem; }
+.passkey-list li { display: flex; justify-content: space-between; align-items: center; gap: .6rem; flex-wrap: wrap; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: .6rem .7rem; }
