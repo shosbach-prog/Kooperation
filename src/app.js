@@ -31,9 +31,11 @@ function createApp(db, opts = {}) {
     const mime = getSettings().logo_mime;
     return LOGO_TYPES[mime] ? { mime, file: path.join(uploadDir, `logo.${LOGO_TYPES[mime]}`) } : null;
   };
+  // Demo-Modus: Anmeldung per Rollenauswahl ohne Passwort und ohne Zwei-Faktor-Code (nur für Vorführungen ohne echte Daten!)
+  const demoMode = opts.demo ?? (process.env.DEMO_MODUS === '1');
   const branding = () => {
     const st = getSettings();
-    return { klinik_name: st.klinik_name, untertitel: st.untertitel, akzentfarbe: st.akzentfarbe, logo: !!logoFile(), logo_version: st.logo_version || 0 };
+    return { klinik_name: st.klinik_name, untertitel: st.untertitel, akzentfarbe: st.akzentfarbe, logo: !!logoFile(), logo_version: st.logo_version || 0, demo: demoMode };
   };
   app.get('/api/branding', (_req, res) => res.json(branding()));
   app.get('/api/branding/logo', (req, res, next) => {
@@ -214,7 +216,7 @@ function createApp(db, opts = {}) {
       throw new HttpError(401, 'Benutzername oder Passwort falsch.');
     }
     if (req.token) db.prepare('DELETE FROM sessions WHERE token = ?').run(req.token);
-    const stage = u.totp_enabled ? '2fa' : (getSettings().zwei_faktor_pflicht ? 'setup' : 'full');
+    const stage = demoMode ? 'full' : u.totp_enabled ? '2fa' : (getSettings().zwei_faktor_pflicht ? 'setup' : 'full');
     if (stage === 'full') resetFails(u.id);
     startSession(res, u.id, stage);
     return stage === 'full' ? { stage, user: publicUser(u) } : { stage, name: u.name };
@@ -1631,7 +1633,7 @@ function createApp(db, opts = {}) {
   const ctx = {
     db, T, TOTP, HttpError, auth, manager, wrap, audit, getSettings, isoDate, isTime, nowLocalMs, todayIso,
     hasMgr, isHaupt, publicUser, loadShifts, loadRules, qualMissing, verbundGroup, checkConflicts, absenceOn, uploadDir, express,
-    hooks, shiftLabel, managerIds, decorateAbsence, timers: opts.timers !== false, backupDir: opts.backupDir || null, startSession, checkLock, registerFail, resetFails,
+    hooks, shiftLabel, managerIds, decorateAbsence, timers: opts.timers !== false, backupDir: opts.backupDir || null, startSession, checkLock, registerFail, resetFails, demo: demoMode, hashPassword,
     scopeOf, inScope, userInScope, requireUnit, requireUser, managerFull, arbzgCheck, report,
   };
   for (const name of fs.readdirSync(path.join(__dirname, 'routes')).filter((f) => f.endsWith('.js')).sort()) {

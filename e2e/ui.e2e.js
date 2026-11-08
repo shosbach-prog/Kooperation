@@ -185,3 +185,35 @@ test('Passkey: einrichten im Profil, danach Anmeldung ohne Passwort und Code', {
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+test('Demo-Modus: Rolle wählen, sofort angemeldet, Rolle wechseln, neue Person', { skip }, async () => {
+  const demo = await H.startServer({ demo: true });
+  try {
+    const { ctx, page, errors } = await open(DEVICES()['iPhone 13']);
+    await page.goto(demo.url);
+    await page.waitForSelector('.demo-person');
+    assert.deepEqual(await H.axe(page), []);
+    assert.deepEqual(await H.layoutProblems(page), []);
+    await page.screenshot({ path: require('path').join(require('os').tmpdir(), 'pep-demo-login.png'), fullPage: true });
+    // Pflegekraft
+    await page.click('.demo-person:has-text("Anna Becker")');
+    await page.waitForSelector('#bottomnav button');
+    assert.equal(await page.locator('#bottomnav button', { hasText: 'Meine' }).count(), 1);
+    // Rolle wechseln → Pflegedienstleitung
+    await page.click('.demo-switch');
+    await page.waitForSelector('.demo-person');
+    await page.click('.demo-person:has-text("Pflegedienstleitung")');
+    await page.waitForSelector('#bottomnav button');
+    assert.equal(await page.locator('#bottomnav button', { hasText: 'Anträge' }).count(), 1);
+    // neue Person
+    await page.click('.demo-switch');
+    await page.click('summary:has-text("Als neue Person")');
+    await page.fill('.demo-neu input[name=name]', 'Maria Muster');
+    await page.selectOption('.demo-neu select[name=rolle]', 'stationsleitung');
+    await page.click('.demo-neu button[type=submit]');
+    await page.waitForSelector('#bottomnav button');
+    assert.match(await page.textContent('#who'), /Maria Muster/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  } finally { demo.server.close(); }
+});

@@ -8,11 +8,11 @@ const TOTP = require('../src/totp');
 let playwright = null;
 try { playwright = require('playwright'); } catch { /* optional */ }
 
-async function startServer() {
+async function startServer(extra = {}) {
   const { openDb } = require('../src/db');
   const { createApp } = require('../src/app');
   const uploadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pep-e2e-'));
-  const server = createApp(openDb(':memory:'), { uploadDir, basePath: '/lwl', timers: false }).listen(0);
+  const server = createApp(openDb(':memory:'), { uploadDir, basePath: '/lwl', timers: false, ...extra }).listen(0);
   await new Promise((r) => server.once('listening', r));
   return { server, url: `http://127.0.0.1:${server.address().port}/lwl/` };
 }

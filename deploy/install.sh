@@ -125,6 +125,19 @@ EOF
   chmod 600 "$DEPLOY_DIR/.env"
   umask 022
 fi
+# Demo-Modus (Anmeldung per Rollenauswahl ohne Passwort/Code) – nur für Vorführungen ohne echte Daten
+if ! grep -q '^DEMO_MODUS=' "$DEPLOY_DIR/.env"; then
+  echo
+  echo "Demo-Modus: Auf der Startseite wählt man eine Rolle (Pflegedienstleitung, Stationsleitung, Pflegekraft)"
+  echo "und ist sofort angemeldet – ohne Passwort und ohne Authenticator-Code. NUR für Vorführungen ohne echte Daten!"
+  if grep -q '^SEED_DEMO=1' "$DEPLOY_DIR/.env"; then
+    read -r -p "Demo-Modus einschalten? [J/n] " DM; DM="${DM:-j}"
+  else
+    read -r -p "Demo-Modus einschalten? [j/N] " DM; DM="${DM:-n}"
+  fi
+  if [[ "$DM" =~ ^[JjYy] ]]; then DM=1; else DM=0; fi
+  printf '\n# Demo-Modus: 1 = Rollenauswahl ohne Passwort/2FA (nur ohne echte Daten!), 0 = normaler Betrieb\nDEMO_MODUS=%s\n' "$DM" >> "$DEPLOY_DIR/.env"
+fi
 # Sicherungs-Passwort (verschlüsselte Sicherungen) – wird einmalig erzeugt, falls noch nicht vorhanden
 NEW_BACKUP_PW=""
 if ! grep -q '^BACKUP_PASSWORT=' "$DEPLOY_DIR/.env"; then
@@ -179,6 +192,8 @@ else
   gelb "Status prüfen mit:  cd $DEPLOY_DIR && docker compose logs caddy"
 fi
 cat <<EOF
+
+$(grep -q '^DEMO_MODUS=1' "$DEPLOY_DIR/.env" && echo "DEMO-MODUS IST AN: Startseite zeigt die Rollenauswahl. Ausschalten: in $DEPLOY_DIR/.env DEMO_MODUS=0 setzen und install.sh erneut ausführen.")
 
 Nächste Schritte:
   1. $URL öffnen und mit Benutzer "manager" anmelden.

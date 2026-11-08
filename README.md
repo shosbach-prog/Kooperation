@@ -154,6 +154,8 @@ cd deploy && cp .env.beispiel .env   # DOMAIN und MANAGER_PASSWORD eintragen
 docker compose up -d --build
 ```
 
+**Demo-Modus** (`DEMO_MODUS=1` in `.env`): Startseite mit Rollenauswahl (Pflegedienstleitung, Stationsleitung, Pflegekraft oder neue Person) – Anmeldung ohne Passwort und ohne 2FA. Nur für Vorführungen ohne echte Daten; im Echtbetrieb `DEMO_MODUS=0`.
+
 Datensicherung: `npm run backup` bzw. auf dem Server `deploy/backup-cron.sh` – mit `BACKUP_PASSWORT` verschlüsselt (AES-256-GCM), Wiederherstellung mit `scripts/restore.js`, Überwachung über `/api/health`. Details: [deploy/UEBERWACHUNG.md](deploy/UEBERWACHUNG.md).
 
 ### Betrieb im Kliniknetz und Zugriff vom privaten Handy

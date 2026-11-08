@@ -468,3 +468,18 @@ dialog.ui-dialog::backdrop { background: rgba(10, 15, 20, .5); }
 .oder::before, .oder::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
 .passkey-list { list-style: none; padding: 0; margin: .5rem 0 1rem; display: grid; gap: .5rem; }
 .passkey-list li { display: flex; justify-content: space-between; align-items: center; gap: .6rem; flex-wrap: wrap; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: .6rem .7rem; }
+
+/* Demo-Modus: Rollenauswahl */
+.login.demo-login { max-width: 760px; margin: 4vh auto; }
+.demo-hinweis { text-align: center; display: grid; justify-items: center; gap: .3rem; margin-bottom: .5rem; }
+.demo-hinweis p { margin: 0; max-width: 52ch; }
+.demo-h { font-size: 1rem; margin: 1rem 0 .5rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.demo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .5rem; }
+button.demo-person { display: flex; align-items: center; justify-content: flex-start; width: 100%; gap: .7rem; text-align: left; background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius); padding: .6rem .7rem; min-height: 60px; font-weight: 400; }
+button.demo-person:hover { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 6%, var(--card)); }
+.demo-person-text { display: grid; gap: .1rem; min-width: 0; }
+.demo-person-text strong { font-size: 1rem; }
+.demo-neu-wrap, .demo-pw { margin-top: 1rem; border-top: 1px solid var(--line); padding-top: .7rem; }
+.demo-neu-wrap summary, .demo-pw summary { cursor: pointer; font-weight: 600; padding: .4rem 0; min-height: 32px; }
+.demo-neu { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); align-items: end; margin-top: .5rem; }
+.demo-switch { margin-left: .4rem; white-space: nowrap; }

@@ -47,6 +47,7 @@ function renderLogin() {
   const pk = passkeyLoginButton();
   if (pk) main().querySelector('#login-form').after(pk);
   main().querySelector('.login').append(legalLinks());
+  if (state.branding?.demo) demoLogin(main().querySelector('.login'));
   const form = document.getElementById('login-form');
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
