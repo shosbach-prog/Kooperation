@@ -104,7 +104,7 @@ function createApp(db, opts = {}) {
     const token = parseCookies(req).sid;
     if (token) {
       const row = db.prepare(`SELECT u.*, s.stage AS session_stage FROM sessions s JOIN users u ON u.id = s.user_id
-        WHERE s.token = ? AND s.expires > ? AND u.active = 1`).get(token, Date.now());
+        WHERE s.token = ? AND s.expires > ? AND u.active = 1 AND (u.austritt = '' OR u.austritt >= ?)`).get(token, Date.now(), todayIso());
       if (row) {
         req.token = token;
         if (row.session_stage === 'full') req.user = row;
@@ -122,12 +122,23 @@ function createApp(db, opts = {}) {
     }
     return next(new HttpError(401, 'Bitte anmelden.'));
   };
-  const manager = (req, _res, next) => (req.user?.role === 'manager' ? next() : next(new HttpError(403, 'Nur für die Einsatzplanung (Manager).')));
+  /** Hauptverwaltung: Rolle „manager“. Weitere Verwalter/innen: Mitarbeitende mit Verwaltungsrechten
+   *  (dauerhaft oder als befristete Vertretung). */
+  const todayIso = () => T.isoDate(nowLocalMs());
+  const isHaupt = (u) => !!u && u.role === 'manager';
+  const hasMgr = (u) => !!u && (u.role === 'manager' || u.admin_rechte === 'voll'
+    || (u.admin_rechte === 'vertretung' && !!u.admin_bis && todayIso() <= u.admin_bis));
+  const manager = (req, _res, next) => (hasMgr(req.user) ? next() : next(new HttpError(403, 'Nur für die Verwaltung / Einsatzplanung.')));
 
   const publicUser = (u) => ({
     id: u.id, name: u.name, username: u.username, role: u.role, qualification: u.qualification,
     weekly_hours: u.weekly_hours, min_hours_month: u.min_hours_month, stundenentgelt: u.stundenentgelt, active: !!u.active,
-    urlaubstage_jahr: u.urlaubstage_jahr, schwerbehindert: !!u.schwerbehindert, zusatzurlaub_tage: u.zusatzurlaub_tage, totp_enabled: !!u.totp_enabled, locked: u.locked_until > Date.now(), recovery_left: JSON.parse(u.recovery_codes || '[]').length,
+    urlaubstage_jahr: u.urlaubstage_jahr, schwerbehindert: !!u.schwerbehindert, zusatzurlaub_tage: u.zusatzurlaub_tage,
+    personalnummer: u.personalnummer, email: u.email, telefon: u.telefon, eintritt: u.eintritt, austritt: u.austritt,
+    befristet_bis: u.befristet_bis, entgeltgruppe: u.entgeltgruppe, stufe: u.stufe, stammbereich_id: u.stammbereich_id,
+    bemerkung: u.bemerkung, admin_rechte: u.admin_rechte || 'keine', admin_bis: u.admin_bis,
+    is_manager: hasMgr(u), is_haupt: isHaupt(u),
+    totp_enabled: !!u.totp_enabled, locked: u.locked_until > Date.now(), recovery_left: JSON.parse(u.recovery_codes || '[]').length,
   });
 
   const startSession = (res, userId, stage) => {
@@ -159,7 +170,8 @@ function createApp(db, opts = {}) {
 
   app.post('/api/login', wrap((req, res) => {
     const { username, password } = req.body || {};
-    const u = db.prepare('SELECT * FROM users WHERE username = ? AND active = 1').get(String(username || '').trim().toLowerCase());
+    const u = db.prepare("SELECT * FROM users WHERE username = ? AND active = 1 AND (austritt = '' OR austritt >= ?)")
+      .get(String(username || '').trim().toLowerCase(), todayIso());
     if (u) checkLock(u);
     if (!u || !verifyPassword(password, u.password_hash)) {
       if (u) registerFail(u);
@@ -295,19 +307,45 @@ function createApp(db, opts = {}) {
     return getSettings();
   }));
 
-  // ---------- Mitarbeitende ----------
+  // ---------- Personalverwaltung ----------
   app.get('/api/users', auth, manager, wrap(() => db.prepare('SELECT * FROM users ORDER BY active DESC, role, name').all().map(publicUser)));
 
+  const isDateOrEmpty = (v) => v === '' || isoDate(v);
   const userFields = (b, partial) => {
     const out = {};
-    if (!partial || 'name' in b) { if (!String(b.name || '').trim()) throw new HttpError(400, 'Name fehlt.'); out.name = String(b.name).trim(); }
+    if (!partial || 'name' in b) { if (!String(b.name || '').trim()) throw new HttpError(400, 'Name fehlt.'); out.name = String(b.name).trim().slice(0, 120); }
     if (!partial || 'username' in b) {
       const un = String(b.username || '').trim().toLowerCase();
       if (!/^[a-z0-9._-]{3,}$/.test(un)) throw new HttpError(400, 'Benutzername: mind. 3 Zeichen (a–z, 0–9, . _ -).');
       out.username = un;
     }
     if ('role' in b || !partial) { out.role = b.role === 'manager' ? 'manager' : 'staff'; }
-    for (const k of ['qualification']) if (k in b) out[k] = String(b[k] || '');
+    for (const k of ['qualification', 'personalnummer', 'telefon', 'entgeltgruppe']) if (k in b) out[k] = String(b[k] ?? '').trim().slice(0, 60);
+    if ('bemerkung' in b) out.bemerkung = String(b.bemerkung ?? '').trim().slice(0, 2000);
+    if ('email' in b) {
+      const e = String(b.email ?? '').trim();
+      if (e && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) throw new HttpError(400, 'E-Mail-Adresse ungültig.');
+      out.email = e;
+    }
+    for (const k of ['eintritt', 'austritt', 'befristet_bis', 'admin_bis']) {
+      if (k in b) { const v = String(b[k] ?? '').trim(); if (!isDateOrEmpty(v)) throw new HttpError(400, `Datum ungültig: ${k}`); out[k] = v; }
+    }
+    if ('stufe' in b) {
+      const v = b.stufe === '' || b.stufe === null || b.stufe === undefined ? null : Number(b.stufe);
+      if (v !== null && (!Number.isInteger(v) || v < 1 || v > 6)) throw new HttpError(400, 'Stufe muss zwischen 1 und 6 liegen.');
+      out.stufe = v;
+    }
+    if ('stammbereich_id' in b) {
+      const v = b.stammbereich_id ? Number(b.stammbereich_id) : null;
+      if (v !== null && !db.prepare('SELECT 1 FROM units WHERE id = ?').get(v)) throw new HttpError(400, 'Bereich nicht gefunden.');
+      out.stammbereich_id = v;
+    }
+    if ('admin_rechte' in b) {
+      if (!['keine', 'voll', 'vertretung'].includes(b.admin_rechte)) throw new HttpError(400, 'Verwaltungsrechte ungültig.');
+      out.admin_rechte = b.admin_rechte;
+      if (b.admin_rechte === 'vertretung' && !isoDate(String(b.admin_bis || ''))) throw new HttpError(400, 'Bitte angeben, bis wann die Vertretung gilt.');
+      if (b.admin_rechte !== 'vertretung') out.admin_bis = '';
+    }
     for (const k of ['weekly_hours', 'min_hours_month', 'stundenentgelt', 'urlaubstage_jahr', 'zusatzurlaub_tage']) {
       if (k in b) { const v = Number(b[k]); if (!Number.isFinite(v) || v < 0) throw new HttpError(400, `Ungültiger Wert: ${k}`); out[k] = v; }
     }
@@ -319,17 +357,31 @@ function createApp(db, opts = {}) {
     return out;
   };
 
+  /** Nur die Hauptverwaltung darf Rechte vergeben und andere Verwalter/innen bearbeiten. */
+  const RECHTE_FELDER = ['role', 'admin_rechte', 'admin_bis'];
+  const isPrivileged = (u) => isHaupt(u) || (u.admin_rechte || 'keine') !== 'keine';
+  const otherActiveHaupt = (id) => db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'manager' AND active = 1 AND id <> ?").get(id).n;
+
+  const applyUserUpdate = (id, f) => {
+    const keys = Object.keys(f);
+    if (keys.length) db.prepare(`UPDATE users SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => f[k]), id);
+    return keys;
+  };
+
   app.post('/api/users', auth, manager, wrap((req) => {
     const f = userFields(req.body || {}, false);
+    if (!isHaupt(req.user) && (f.role === 'manager' || (f.admin_rechte && f.admin_rechte !== 'keine'))) {
+      throw new HttpError(403, 'Verwaltungsrechte kann nur die Hauptverwaltung vergeben.');
+    }
     const pw = req.body.password;
     if (!pw || String(pw).length < 6) throw new HttpError(400, 'Startpasswort: mind. 6 Zeichen.');
     if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(f.username)) throw new HttpError(409, 'Benutzername ist bereits vergeben.');
-    const id = db.prepare(`INSERT INTO users (name, username, password_hash, role, qualification, weekly_hours, min_hours_month, stundenentgelt, urlaubstage_jahr)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(f.name, f.username, hashPassword(pw), f.role, f.qualification || '',
-      f.weekly_hours ?? getSettings().wochenstunden_standard, f.min_hours_month ?? 0, f.stundenentgelt ?? 0,
-      f.urlaubstage_jahr ?? getSettings().urlaubstage_standard).lastInsertRowid;
-    if (f.schwerbehindert) db.prepare('UPDATE users SET schwerbehindert = 1, zusatzurlaub_tage = ? WHERE id = ?').run(f.zusatzurlaub_tage, id);
-    audit(req.user.id, 'user.create', { id, username: f.username });
+    const st = getSettings();
+    const id = db.prepare('INSERT INTO users (name, username, password_hash, role, weekly_hours, urlaubstage_jahr) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(f.name, f.username, hashPassword(pw), f.role, st.wochenstunden_standard, st.urlaubstage_standard).lastInsertRowid;
+    const { name, username, role, ...rest } = f; // eslint-disable-line no-unused-vars
+    applyUserUpdate(id, rest);
+    audit(req.user.id, 'user.create', { id, user_id: id, username: f.username });
     return publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id));
   }));
 
@@ -338,10 +390,20 @@ function createApp(db, opts = {}) {
     const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
     if (!existing) throw new HttpError(404, 'Nicht gefunden.');
     const f = userFields(req.body || {}, true);
+    // unveränderte Rechte-Felder nicht als Änderung werten (das Formular schickt alles mit)
+    for (const k of RECHTE_FELDER) if (k in f && String(f[k]) === String(existing[k] ?? '')) delete f[k];
+    if (!isHaupt(req.user)) {
+      if (RECHTE_FELDER.some((k) => k in f)) throw new HttpError(403, 'Verwaltungsrechte kann nur die Hauptverwaltung vergeben.');
+      if (id !== req.user.id && isPrivileged(existing)) throw new HttpError(403, 'Andere Verwalter/innen kann nur die Hauptverwaltung bearbeiten.');
+    }
     if (f.username && db.prepare('SELECT 1 FROM users WHERE username = ? AND id <> ?').get(f.username, id)) throw new HttpError(409, 'Benutzername ist bereits vergeben.');
-    if (id === req.user.id && (f.active === 0 || f.role === 'staff')) throw new HttpError(400, 'Sie können sich nicht selbst deaktivieren oder herabstufen.');
-    const keys = Object.keys(f);
-    if (keys.length) db.prepare(`UPDATE users SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => f[k]), id);
+    if (id === req.user.id && (f.active === 0 || RECHTE_FELDER.some((k) => k in f))) {
+      throw new HttpError(400, 'Sie können Ihre eigenen Rechte nicht ändern oder sich selbst deaktivieren.');
+    }
+    if (isHaupt(existing) && (f.role === 'staff' || f.active === 0) && otherActiveHaupt(id) === 0) {
+      throw new HttpError(400, 'Es muss mindestens eine aktive Hauptverwaltung geben.');
+    }
+    const keys = applyUserUpdate(id, f);
     if (req.body.password) {
       if (String(req.body.password).length < 6) throw new HttpError(400, 'Passwort: mind. 6 Zeichen.');
       db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(req.body.password), id);
@@ -354,8 +416,36 @@ function createApp(db, opts = {}) {
       db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
     }
     if (req.body.unlock) db.prepare('UPDATE users SET failed_logins = 0, locked_until = 0 WHERE id = ?').run(id);
-    audit(req.user.id, 'user.update', { id, fields: keys, password: !!req.body.password, reset_2fa: !!req.body.reset_2fa });
+    const rightsChanged = keys.some((k) => RECHTE_FELDER.includes(k));
+    audit(req.user.id, rightsChanged ? 'user.rights' : 'user.update', {
+      id, user_id: id, fields: keys, rechte: f.admin_rechte, bis: f.admin_bis, role: f.role,
+      password: !!req.body.password, reset_2fa: !!req.body.reset_2fa,
+    });
     return publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id));
+  }));
+
+  /** Dienste einer Person (Personalakte) */
+  app.get('/api/users/:id/shifts', auth, manager, wrap((req) => {
+    const from = isoDate(req.query.from) ? req.query.from : todayIso();
+    const to = isoDate(req.query.to) ? req.query.to : T.isoDate(T.parseDate(from) + 60 * T.DAY);
+    return loadShifts('s.date BETWEEN ? AND ? AND s.id IN (SELECT shift_id FROM assignments WHERE user_id = ?)', [from, to, Number(req.params.id)]);
+  }));
+
+  /** Personalliste als CSV (Excel) */
+  app.get('/api/users.csv', auth, manager, wrap((req, res) => {
+    const units = new Map(db.prepare('SELECT id, name FROM units').all().map((u) => [u.id, u.name]));
+    const head = ['Personalnr.', 'Name', 'Benutzer', 'Qualifikation', 'Stammbereich', 'Entgeltgruppe', 'Stufe', 'Wochenstd.',
+      'Urlaubstage', 'Eintritt', 'befristet bis', 'Austritt', 'E-Mail', 'Telefon', 'Verwaltungsrechte', 'Status'];
+    const rechte = (u) => (u.role === 'manager' ? 'Hauptverwaltung' : u.admin_rechte === 'voll' ? 'Verwalter/in'
+      : u.admin_rechte === 'vertretung' ? `Vertretung bis ${u.admin_bis}` : '');
+    const rows = db.prepare('SELECT * FROM users ORDER BY active DESC, name').all().map((u) => [u.personalnummer, u.name, u.username,
+      u.qualification, units.get(u.stammbereich_id) || '', u.entgeltgruppe, u.stufe ?? '', String(u.weekly_hours).replace('.', ','),
+      String(u.urlaubstage_jahr).replace('.', ','), u.eintritt, u.befristet_bis, u.austritt, u.email, u.telefon, rechte(u), u.active ? 'aktiv' : 'inaktiv']);
+    const csv = '﻿' + [head, ...rows].map((l) => l.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n');
+    audit(req.user.id, 'users.export', { count: rows.length });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="personalliste.csv"');
+    res.send(csv);
   }));
 
   // ---------- Bereiche / Stationen ----------
@@ -557,7 +647,7 @@ function createApp(db, opts = {}) {
       const h = T.holidayName(T.isoDate(t));
       if (h) holidays[T.isoDate(t)] = h;
     }
-    const isMgr = req.user.role === 'manager';
+    const isMgr = hasMgr(req.user);
     const absences = db.prepare(`SELECT a.id, a.user_id, a.type, a.from_date, a.to_date, a.status, u.name FROM absences a
       JOIN users u ON u.id = a.user_id WHERE a.status IN ('beantragt','genehmigt','gemeldet') AND a.from_date <= ? AND a.to_date >= ?
       ${isMgr ? '' : 'AND a.user_id = ?'}`).all(...(isMgr ? [to, from] : [to, from, req.user.id]));
@@ -624,7 +714,7 @@ function createApp(db, opts = {}) {
     const settings = getSettings();
     const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(Number(req.params.id));
     if (!shift) throw new HttpError(404, 'Schicht nicht gefunden.');
-    const isMgr = req.user.role === 'manager';
+    const isMgr = hasMgr(req.user);
     const userId = isMgr && req.body?.user_id ? Number(req.body.user_id) : req.user.id;
     const target = db.prepare('SELECT * FROM users WHERE id = ? AND active = 1').get(userId);
     if (!target) throw new HttpError(404, 'Mitarbeiter/in nicht gefunden.');
@@ -656,7 +746,7 @@ function createApp(db, opts = {}) {
     const settings = getSettings();
     const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(Number(req.params.id));
     if (!shift) throw new HttpError(404, 'Schicht nicht gefunden.');
-    const isMgr = req.user.role === 'manager';
+    const isMgr = hasMgr(req.user);
     const userId = isMgr && req.query.user_id ? Number(req.query.user_id) : req.user.id;
     if (!db.prepare('SELECT 1 FROM assignments WHERE shift_id = ? AND user_id = ?').get(shift.id, userId)) throw new HttpError(404, 'Nicht eingetragen.');
     const reason = readReason(req, !isMgr && settings.begruendung_austragen);
@@ -688,7 +778,7 @@ function createApp(db, opts = {}) {
   app.get('/api/log', auth, manager, wrap((req) => {
     const limit = Math.min(Number(req.query.limit) || 200, 1000);
     const rows = db.prepare(`SELECT * FROM audit_log WHERE action IN ('assignment.add','assignment.remove','absence.create','absence.decide',
-      'absence.update','absence.delete','attachment.upload') ORDER BY id DESC LIMIT ?`).all(limit);
+      'absence.update','absence.delete','attachment.upload','user.rights','user.create') ORDER BY id DESC LIMIT ?`).all(limit);
     const userName = new Map(db.prepare('SELECT id, name FROM users').all().map((u) => [u.id, u.name]));
     const shiftInfo = db.prepare(`SELECT s.date, st.code, u.name AS unit_name FROM shifts s JOIN shift_types st ON st.id = s.shift_type_id
       JOIN units u ON u.id = s.unit_id WHERE s.id = ?`);
@@ -747,16 +837,23 @@ function createApp(db, opts = {}) {
 
   const loadAbsence = (req) => {
     const a = db.prepare('SELECT * FROM absences WHERE id = ?').get(Number(req.params.id));
-    if (!a || (req.user.role !== 'manager' && a.user_id !== req.user.id)) throw new HttpError(404, 'Eintrag nicht gefunden.');
+    if (!a || (!hasMgr(req.user) && a.user_id !== req.user.id)) throw new HttpError(404, 'Eintrag nicht gefunden.');
     return a;
   };
 
   app.get('/api/absences', auth, wrap((req) => {
     const settings = getSettings();
-    const isMgr = req.user.role === 'manager';
+    // „mine“: eigene Ansicht, auch für Verwalter/innen, die selbst im Dienst arbeiten
+    const isMgr = hasMgr(req.user) && !req.query.mine;
     const cond = [];
     const params = [];
-    if (!isMgr) { cond.push('a.user_id = ?'); params.push(req.user.id); } else if (req.query.user_id) { cond.push('a.user_id = ?'); params.push(Number(req.query.user_id)); }
+    let kontoUser = null;
+    if (!isMgr) {
+      cond.push('a.user_id = ?'); params.push(req.user.id); kontoUser = req.user;
+    } else if (req.query.user_id) {
+      cond.push('a.user_id = ?'); params.push(Number(req.query.user_id));
+      kontoUser = db.prepare('SELECT * FROM users WHERE id = ?').get(Number(req.query.user_id)) || null;
+    }
     if (isoDate(req.query.from)) { cond.push('a.to_date >= ?'); params.push(req.query.from); }
     if (isoDate(req.query.to)) { cond.push('a.from_date <= ?'); params.push(req.query.to); }
     if (req.query.status) { cond.push('a.status = ?'); params.push(String(req.query.status)); }
@@ -765,8 +862,8 @@ function createApp(db, opts = {}) {
     const year = Number(req.query.year) || Number(T.isoDate(nowLocalMs()).slice(0, 4));
     return {
       absences: rows.map((a) => decorateAbsence(a, settings)),
-      urlaub: isMgr ? null : urlaubKonto(req.user, year),
-      zusatzurlaub: isMgr || !req.user.schwerbehindert ? null : urlaubKonto(req.user, year, 'zusatzurlaub'),
+      urlaub: kontoUser ? urlaubKonto(kontoUser, year) : null,
+      zusatzurlaub: kontoUser && kontoUser.schwerbehindert ? urlaubKonto(kontoUser, year, 'zusatzurlaub') : null,
       au_ab_tag: settings.au_ab_tag,
     };
   }));
@@ -774,7 +871,7 @@ function createApp(db, opts = {}) {
   app.post('/api/absences', auth, wrap((req) => {
     const settings = getSettings();
     const b = req.body || {};
-    const isMgr = req.user.role === 'manager';
+    const isMgr = hasMgr(req.user);
     const userId = isMgr && b.user_id ? Number(b.user_id) : req.user.id;
     const u = db.prepare('SELECT * FROM users WHERE id = ? AND active = 1').get(userId);
     if (!u) throw new HttpError(404, 'Mitarbeiter/in nicht gefunden.');
@@ -805,7 +902,8 @@ function createApp(db, opts = {}) {
         }
       }
     }
-    const status = b.type === 'krank' ? 'gemeldet' : (isMgr ? 'genehmigt' : 'beantragt');
+    // Eigene Anträge von Verwalter/innen werden ebenfalls beantragt (Vier-Augen-Prinzip)
+    const status = b.type === 'krank' ? 'gemeldet' : (isMgr && userId !== req.user.id ? 'genehmigt' : 'beantragt');
     const id = db.prepare(`INSERT INTO absences (user_id, type, from_date, to_date, status, note, created_by, decided_by, decided_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(userId, b.type, b.from, b.to, status, note, req.user.id,
       status === 'genehmigt' ? req.user.id : null, status === 'genehmigt' ? new Date().toISOString() : null).lastInsertRowid;
@@ -823,6 +921,7 @@ function createApp(db, opts = {}) {
     const settings = getSettings();
     const a = loadAbsence(req);
     if (a.type === 'krank') throw new HttpError(400, 'Krankmeldungen werden nicht genehmigt.');
+    if (a.user_id === req.user.id) throw new HttpError(403, 'Eigene Anträge muss eine andere Verwaltung genehmigen.');
     const status = req.body?.status;
     if (!['genehmigt', 'abgelehnt'].includes(status)) throw new HttpError(400, 'Status ungültig.');
     const note = String(req.body?.note || '').trim().slice(0, 500);
@@ -839,7 +938,7 @@ function createApp(db, opts = {}) {
   app.put('/api/absences/:id', auth, wrap((req) => {
     const settings = getSettings();
     const a = loadAbsence(req);
-    const isMgr = req.user.role === 'manager';
+    const isMgr = hasMgr(req.user);
     if (!isMgr && a.type !== 'krank') throw new HttpError(403, 'Urlaubsanträge können nur zurückgezogen werden.');
     const to = req.body?.to;
     const from = isMgr && isoDate(req.body?.from) ? req.body.from : a.from_date;
@@ -859,7 +958,7 @@ function createApp(db, opts = {}) {
 
   app.delete('/api/absences/:id', auth, wrap((req) => {
     const a = loadAbsence(req);
-    const isMgr = req.user.role === 'manager';
+    const isMgr = hasMgr(req.user);
     if (!isMgr && !(a.type !== 'krank' && a.status === 'beantragt')) {
       throw new HttpError(403, 'Nur noch nicht entschiedene Urlaubsanträge können zurückgezogen werden. Bitte wenden Sie sich an die Einsatzplanung.');
     }
@@ -903,7 +1002,7 @@ function createApp(db, opts = {}) {
 
   const loadAttachment = (req) => {
     const f = db.prepare('SELECT f.*, a.user_id FROM attachments f JOIN absences a ON a.id = f.absence_id WHERE f.id = ?').get(Number(req.params.id));
-    if (!f || (req.user.role !== 'manager' && f.user_id !== req.user.id)) throw new HttpError(404, 'Datei nicht gefunden.');
+    if (!f || (!hasMgr(req.user) && f.user_id !== req.user.id)) throw new HttpError(404, 'Datei nicht gefunden.');
     return f;
   };
 
@@ -920,7 +1019,7 @@ function createApp(db, opts = {}) {
 
   app.delete('/api/attachments/:id', auth, wrap((req) => {
     const f = loadAttachment(req);
-    if (req.user.role !== 'manager' && f.uploaded_by !== req.user.id) throw new HttpError(403, 'Nicht erlaubt.');
+    if (!hasMgr(req.user) && f.uploaded_by !== req.user.id) throw new HttpError(403, 'Nicht erlaubt.');
     fs.rmSync(path.join(uploadDir, f.stored_name), { force: true });
     db.prepare('DELETE FROM attachments WHERE id = ?').run(f.id);
     audit(req.user.id, 'attachment.delete', { id: f.id, absence_id: f.absence_id });
@@ -985,7 +1084,7 @@ function createApp(db, opts = {}) {
   };
 
   app.get('/api/report', auth, wrap((req) => {
-    const isMgr = req.user.role === 'manager';
+    const isMgr = hasMgr(req.user);
     return report(req.query.month, isMgr ? (req.query.user_id ? Number(req.query.user_id) : null) : req.user.id);
   }));
 

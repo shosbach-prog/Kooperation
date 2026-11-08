@@ -231,6 +231,13 @@ function migrate(db) {
   add('users', 'urlaubstage_jahr REAL NOT NULL DEFAULT 30');
   add('users', 'schwerbehindert INTEGER NOT NULL DEFAULT 0');
   add('users', 'zusatzurlaub_tage REAL NOT NULL DEFAULT 0');
+  // Personalverwaltung und Verwaltungsrechte
+  for (const col of ['personalnummer', 'email', 'telefon', 'eintritt', 'austritt', 'befristet_bis', 'entgeltgruppe', 'bemerkung', 'admin_bis']) {
+    add('users', `${col} TEXT NOT NULL DEFAULT ''`);
+  }
+  add('users', 'stufe INTEGER');
+  add('users', 'stammbereich_id INTEGER');
+  add('users', "admin_rechte TEXT NOT NULL DEFAULT 'keine'");
   // Abwesenheitsarten erweitern (CHECK-Bedingung erfordert Neuaufbau der Tabelle)
   const absSql = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'absences'").get()?.sql || '';
   if (!absSql.includes('zusatzurlaub')) {

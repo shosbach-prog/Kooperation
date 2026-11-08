@@ -15,7 +15,13 @@ Arbeitszeit wird angelehnt an den **TVöD (BT-K)** angerechnet.
 - Dienstplan als **Wochenraster**, farbig markiert: unterbesetzt / Minimum erreicht / voll
 - Personen ein- und austragen; Ausnahmen bei Ruhezeit oder Vollbesetzung nur nach Bestätigung
 - Besetzung und Notiz einzelner Schichten ändern
-- **Mitarbeitende** verwalten: Qualifikation, Wochenstunden, **Mindestverfügbarkeit (Std./Monat)**, Stundenentgelt
+- **Personalverwaltung** mit Personalakte: Personalnummer, Kontaktdaten, Qualifikation, Stammbereich, Wochenstunden,
+  **Mindestverfügbarkeit (Std./Monat)**, Vertrag (Eintritt, Befristung, Austritt, Entgeltgruppe/Stufe), Urlaubsanspruch,
+  Bemerkung; dazu Urlaubskonto, Zeitkonto, kommende Dienste und Abwesenheiten auf einen Blick; Suche, Filter, Excel-Export;
+  Hinweis auf auslaufende Befristungen; nach dem Austrittsdatum ist keine Anmeldung mehr möglich
+- **Weitere Verwalter/innen und Vertretungen:** Die Hauptverwaltung kann Mitarbeitenden Verwaltungsrechte geben,
+  dauerhaft oder **befristet als Vertretung** (endet automatisch). Verwalter/innen arbeiten weiter selbst im Dienstplan mit;
+  eigene Urlaubsanträge muss eine andere Verwaltung genehmigen (Vier-Augen-Prinzip). Rechte vergeben kann nur die Hauptverwaltung.
 - **Abwesenheiten:** Urlaubsanträge genehmigen oder (mit Begründung) ablehnen, Krankmeldungen mit Status der AU-Bescheinigung, Abwesenheiten direkt eintragen (z. B. bei telefonischer Krankmeldung)
 - **Protokoll** aller Ein- und Austragungen mit Begründung sowie aller Abwesenheiten
 - **Auswertung TVöD** je Monat: Soll, Ist, Saldo, Nacht-, Sonntags-, Feiertags- und Vorfeststunden, Zuschläge in Euro, Liste der unterbesetzten Schichten, **CSV-Export** für Excel

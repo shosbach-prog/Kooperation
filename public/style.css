@@ -134,6 +134,15 @@ ul.files { list-style: none; padding: 0; margin: .25rem 0 0; font-size: .85rem; 
 ul.files li { display: flex; gap: .25rem; align-items: center; }
 .warn-card { border-left: 4px solid var(--bad); }
 textarea { width: 100%; font: inherit; }
+.badges { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .25rem; }
+tr.clickable { cursor: pointer; }
+tr.clickable:hover td { background: color-mix(in srgb, var(--primary) 6%, transparent); }
+.filters label { min-width: 180px; }
+fieldset { border: 1px solid var(--line); border-radius: 8px; padding: .5rem .75rem .75rem; margin: 0 0 .75rem; }
+legend { font-weight: 600; font-size: .9rem; padding: 0 .3rem; }
+.akte-head { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
+.akte-contact { display: flex; flex-direction: column; gap: .3rem; }
+.akte-contact a { color: var(--primary); text-decoration: none; }
 #toast { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: .6rem 1rem; border-radius: var(--radius); opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; z-index: 20; }
 #toast.show { opacity: 1; }
 #toast.err { background: var(--bad); color: #fff; }
