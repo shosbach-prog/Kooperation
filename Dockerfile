@@ -14,10 +14,11 @@ COPY src ./src
 COPY public ./public
 COPY scripts ./scripts
 
-# Daten (Datenbank + AU-Bescheinigungen) liegen außerhalb des Containers im Volume /data
+# Daten (Datenbank + AU-Bescheinigungen) liegen außerhalb des Containers im Volume /data.
+# Der Start erfolgt als root nur, um die Rechte von /data zu korrigieren; danach läuft
+# das Programm als Benutzer "node" (siehe scripts/entrypoint.js).
 RUN mkdir -p /data && chown node:node /data
 VOLUME ["/data"]
-USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s CMD wget -qO- http://127.0.0.1:3000/ >/dev/null || exit 1
-CMD ["node", "server.js"]
+CMD ["node", "scripts/entrypoint.js"]

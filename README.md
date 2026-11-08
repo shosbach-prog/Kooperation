@@ -106,6 +106,8 @@ Die Passwörter bitte **vor jedem echten Einsatz ändern**.
 
 ### Kostenlos online stellen
 
+**netcup-Server (VPS/Root-Server):** Installation mit einem Skript, siehe **[deploy/NETCUP.md](deploy/NETCUP.md)**.
+
 Eine Schritt-für-Schritt-Anleitung für einen kostenlosen Server in Frankfurt (Oracle Cloud Always Free,
 DuckDNS, automatisches HTTPS, tägliche Sicherung) steht in **[deploy/ANLEITUNG.md](deploy/ANLEITUNG.md)**.
 Kurzfassung mit Docker:

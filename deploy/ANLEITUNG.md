@@ -149,7 +149,7 @@ crontab -e
 Unten anfügen:
 
 ```
-0 3 * * * cd /home/ubuntu/kooperation/deploy && docker compose exec -T app node scripts/backup.js >> /home/ubuntu/backup.log 2>&1
+0 3 * * * cd /home/ubuntu/kooperation/deploy && docker compose exec -T -u node app node scripts/backup.js >> /home/ubuntu/backup.log 2>&1
 ```
 
 Die Sicherungen liegen in `deploy/data/backups/` (14 Tage). Holen Sie gelegentlich eine Kopie
