@@ -335,7 +335,7 @@ function createApp(db, opts = {}) {
       if (k === 'akzentfarbe' && !/^#[0-9a-f]{6}$/i.test(String(v))) throw new HttpError(400, 'Farbe bitte als #RRGGBB angeben.');
       if (k === 'klinik_name' && !String(v).trim()) throw new HttpError(400, 'Name der Einrichtung fehlt.');
       if (k === 'urlaub_uebertrag_bis' && !/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(String(v))) throw new HttpError(400, 'Übertrag bis: Format MM-TT, z. B. 03-31.');
-      if (typeof def === 'string' && !Array.isArray(def)) { v = String(v).trim().slice(0, 120); if (k.startsWith('nacht_') && !isTime(v)) throw new HttpError(400, `Ungültige Uhrzeit für ${k}.`); }
+      if (typeof def === 'string' && !Array.isArray(def)) { v = String(v).trim().slice(0, k.endsWith('_text') ? 20000 : 120); if (k.startsWith('nacht_') && !isTime(v)) throw new HttpError(400, `Ungültige Uhrzeit für ${k}.`); }
       upd.run(k, JSON.stringify(v));
     }
     audit(req.user.id, 'settings.update', req.body);

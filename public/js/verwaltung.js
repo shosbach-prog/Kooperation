@@ -165,6 +165,11 @@ async function renderSettings() {
     ['zuschlag_feiertag', 'Zuschlag Feiertagsarbeit (%)', 'number', 'TVöD: 35 % mit Freizeitausgleich, 135 % ohne'],
     ['zuschlag_vorfest', 'Zuschlag 24.12./31.12. ab 6 Uhr (%)', 'number'],
     ['zuschlag_samstag', 'Zuschlag Samstag 13–21 Uhr (%)', 'number'],
+    ['loeschfrist_au_monate', 'AU-Bescheinigungen löschen … Monate nach Ende der Krankheit', 'number', '0 = nicht automatisch löschen'],
+    ['loeschfrist_protokoll_monate', 'Protokoll löschen nach … Monaten', 'number', 'mit Personalrat/Datenschutz abstimmen; 0 = nie'],
+    ['loeschfrist_mitteilungen_tage', 'Mitteilungen löschen nach … Tagen', 'number', '0 = nie'],
+    ['impressum_text', 'Impressum (Klartext)', 'textarea', 'Anbieterkennzeichnung nach § 5 DDG: Name, Anschrift, Vertretungsberechtigte, Kontakt.'],
+    ['datenschutz_text', 'Datenschutzhinweise (Klartext; leer = Muster anzeigen)', 'textarea', 'Absätze durch Leerzeile trennen; eine kurze erste Zeile ohne Punkt wird zur Überschrift.'],
     ['samstag_bei_schichtarbeit', 'Samstagszuschlag auch im Schichtdienst anrechnen', 'checkbox', 'Nach TVöD entfällt er bei Wechselschicht-/Schichtarbeit.'],
   ];
   const els = {};
@@ -172,6 +177,7 @@ async function renderSettings() {
     h('div', { class: 'grid-2' }, fields.map(([k, label, type, hint]) => {
       const el = type === 'list'
         ? h('textarea', { rows: 6, value: (s[k] || []).join('\n') })
+        : type === 'textarea' ? h('textarea', { rows: 8, value: s[k] || '' })
         : h('input', type === 'checkbox' ? { type, checked: !!s[k] } : { type, value: s[k], step: type === 'number' ? 'any' : undefined, style: type === 'text' ? { width: '100%' } : undefined });
       el.dataset.kind = type;
       els[k] = el;
@@ -189,7 +195,7 @@ async function renderSettings() {
       toast('Einstellungen gespeichert.');
     } catch (e) { toast(e.message, true); }
   });
-  setMain(form, logoCard());
+  setMain(form, logoCard(), cleanupCard());
 }
 
 function logoCard() {

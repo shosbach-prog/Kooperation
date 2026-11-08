@@ -440,3 +440,10 @@ dialog.ui-dialog::backdrop { background: rgba(10, 15, 20, .5); }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* Impressum / Datenschutz */
+.legal-text { max-height: 60vh; overflow-y: auto; padding-right: .3rem; }
+.legal-text h3 { font-size: 1rem; margin: .9rem 0 .2rem; }
+.legal-text p { margin: 0 0 .6rem; }
+.legal-links { text-align: center; margin: .8rem 0 0; }
+.legal-links a { display: inline-block; padding: .5rem .3rem; }

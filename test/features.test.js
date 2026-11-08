@@ -26,8 +26,8 @@ function client() {
   let cookie = '';
   const c = async (method, url, body) => {
     const res = await fetch(base + url, {
-      method, headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(cookie ? { Cookie: cookie } : {}) },
-      body: body ? JSON.stringify(body) : undefined,
+      method, headers: { ...(body ? { 'Content-Type': Buffer.isBuffer(body) ? 'application/octet-stream' : 'application/json' } : {}), ...(cookie ? { Cookie: cookie } : {}) },
+      body: body ? (Buffer.isBuffer(body) ? body : JSON.stringify(body)) : undefined,
     });
     const sc = res.headers.get('set-cookie');
     if (sc) cookie = sc.split(';')[0];
@@ -589,4 +589,47 @@ test('Exporte: Lohn-Übergabe und Aushang', async () => {
   assert.doesNotMatch(a.data, /krank|Urlaub/i);
   assert.equal((await mgr('GET', `/api/export/aushang?unit_id=${n.unit_id}&from=${day(0)}&to=${day(60)}`)).status, 400);
   assert.equal((await mgr('GET', `/api/export/aushang?unit_id=99999&from=${day(0)}&to=${day(6)}`)).status, 404);
+});
+
+test('Datenschutz: Impressum, Auskunft und Löschfristen', async () => {
+  // öffentlich lesbar, ohne Anmeldung
+  let r = await fetch(`${base}/api/legal`).then((x) => x.json());
+  assert.equal(r.datenschutz_muster, true);
+  assert.match(r.datenschutz, /MUSTER/);
+  assert.match(r.datenschutz, /12 Monate nach Ende/);
+  const imp = 'Landschaftsverband Westfalen-Lippe\n\nMusterstraße 1\n44287 Dortmund';
+  assert.equal((await mgr('PUT', '/api/settings', { impressum_text: imp, datenschutz_text: 'Eigene Hinweise' })).status, 200);
+  r = await fetch(`${base}/api/legal`).then((x) => x.json());
+  assert.equal(r.impressum, imp); // lange Texte werden nicht auf 120 Zeichen gekürzt, Zeilenumbrüche bleiben
+  assert.equal(r.datenschutz, 'Eigene Hinweise');
+  assert.equal(r.datenschutz_muster, false);
+  await mgr('PUT', '/api/settings', { datenschutz_text: '' });
+  // Auskunft
+  const lena = await as('lhoffmann');
+  const ex = await lena('GET', '/api/me/export');
+  assert.equal(ex.status, 200);
+  assert.match(ex.headers.get('content-disposition'), /meine-daten-/);
+  assert.equal(ex.data.person.username, 'lhoffmann');
+  assert.ok(Array.isArray(ex.data.abwesenheiten) && Array.isArray(ex.data.dienste));
+  assert.equal(ex.data.person.password_hash, undefined);
+  // Löschlauf: alte AU-Datei, alter Protokolleintrag, alte Mitteilung
+  const pdf = Buffer.from('%PDF-1.4\n% test\n');
+  const alt = (await mgr('POST', '/api/absences', { user_id: users.kschulz, type: 'krank', from: '2020-01-06', to: '2020-01-10' })).data;
+  assert.ok(alt.id, JSON.stringify(alt));
+  const neu = (await mgr('POST', '/api/absences', { user_id: users.kschulz, type: 'krank', from: day(-30), to: day(-29) })).data;
+  assert.ok(neu.id, JSON.stringify(neu));
+  for (const a of [alt, neu]) assert.equal((await mgr('POST', `/api/absences/${a.id}/attachments`, pdf)).status, 200);
+  assert.equal((await lena('POST', '/api/admin/cleanup')).status, 403);
+  const res = (await mgr('POST', '/api/admin/cleanup')).data;
+  assert.ok(res.au >= 1);
+  const find = async (a) => {
+    const d = (await mgr('GET', `/api/absences?year=${a.from_date.slice(0, 4)}&user_id=${users.kschulz}`)).data;
+    return (Array.isArray(d) ? d : d.items || d.absences || []).find((x) => x.id === a.id);
+  };
+  assert.equal((await find(alt)).attachments.length, 0);
+  assert.equal((await find(neu)).attachments.length, 1);
+  // Frist 0 = nichts löschen
+  await mgr('PUT', '/api/settings', { loeschfrist_au_monate: 0 });
+  assert.equal((await mgr('POST', '/api/admin/cleanup')).data.au, 0);
+  await mgr('PUT', '/api/settings', { loeschfrist_au_monate: 12 });
 });
