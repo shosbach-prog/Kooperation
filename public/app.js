@@ -61,7 +61,17 @@ const mondayOf = (iso) => addDays(iso, -((weekday(iso) + 6) % 7));
 const isMgr = () => state.me && state.me.role === 'manager';
 const main = () => document.getElementById('main');
 
-function setMain(...nodes) { main().replaceChildren(...nodes.flat(Infinity).filter(Boolean)); }
+function setMain(...nodes) {
+  main().replaceChildren(...nodes.flat(Infinity).filter(Boolean));
+  // Tabellen auf dem Handy als Karten darstellen: Spaltenüberschrift je Zelle hinterlegen
+  for (const table of main().querySelectorAll('table:not(.plan)')) {
+    const heads = [...table.querySelectorAll('thead th')].map((th) => th.textContent);
+    table.classList.add('stack');
+    for (const tr of table.querySelectorAll('tbody tr')) {
+      [...tr.children].forEach((td, i) => { if (heads[i]) td.dataset.label = heads[i]; });
+    }
+  }
+}
 
 // ---------- Anmeldung ----------
 function renderLogin() {
@@ -213,8 +223,56 @@ async function renderPlan() {
         ' können Sie Schichten aus der Mindestbesetzung anlegen.') : h('p', { class: 'muted' }, 'Die Einsatzplanung hat den Plan noch nicht freigegeben.'))
     : null;
 
+  if (isPhone()) {
+    renderPlanPhone({ from, to, days, plan, byKey, staffUsers, activeUnits, shownTypes, unitSelect, kw, empty });
+    return;
+  }
   setMain(h('div', { class: 'card' }, toolbar, legend, empty,
     h('div', { class: 'table-wrap' }, h('table', { class: 'plan' }, h('thead', {}, thead), h('tbody', {}, tbody)))));
+}
+
+// ---------- Handyansicht: ein Tag, Dienste untereinander ----------
+const phoneQuery = window.matchMedia('(max-width: 760px)');
+const isPhone = () => phoneQuery.matches;
+phoneQuery.addEventListener('change', () => { if (state.view === 'plan' && state.me) renderPlan(); });
+
+function renderPlanPhone({ from, days, plan, byKey, staffUsers, activeUnits, shownTypes, unitSelect, kw, empty }) {
+  if (!state.day || !days.includes(state.day)) state.day = days.includes(todayIso()) ? todayIso() : from;
+  const day = state.day;
+  const nav = h('div', { class: 'phone-nav' },
+    h('button', { class: 'ghost', 'aria-label': 'Vorwoche', onclick: () => { state.weekStart = addDays(from, -7); state.day = addDays(day, -7); renderPlan(); } }, '‹'),
+    h('strong', {}, `KW ${kw}`),
+    h('button', { class: 'ghost', onclick: () => { state.weekStart = mondayOf(todayIso()); state.day = todayIso(); renderPlan(); } }, 'Heute'),
+    h('button', { class: 'ghost', 'aria-label': 'Nächste Woche', onclick: () => { state.weekStart = addDays(from, 7); state.day = addDays(day, 7); renderPlan(); } }, '›'));
+  const chips = h('div', { class: 'day-chips' }, days.map((d) => {
+    const mineHere = plan.shifts.some((s) => s.date === d && s.assigned.some((a) => a.user_id === state.me.id));
+    const gap = plan.shifts.some((s) => s.date === d && (s.assigned.length < s.min_staff || s.qual_missing.length));
+    return h('button', {
+      class: `day-chip${d === day ? ' active' : ''}${plan.holidays[d] ? ' holiday' : ''}`,
+      onclick: () => { state.day = d; renderPlan(); },
+    }, h('span', { class: 'wd' }, WD[weekday(d)]), h('span', { class: 'dn' }, d.slice(8)),
+      mineHere ? h('span', { class: 'dot mine', title: 'eigener Dienst' }) : gap ? h('span', { class: 'dot gap', title: 'unterbesetzt' }) : null);
+  }));
+  const abs = absentOn(day);
+  const mineAbs = abs.find((a) => a.user_id === state.me.id);
+  const head = h('div', { class: 'phone-day' },
+    h('h2', {}, `${['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'][weekday(day)]}, ${fmtDate(day)}`),
+    plan.holidays[day] ? h('div', { class: 'small holiday-text' }, plan.holidays[day]) : null,
+    mineAbs ? h('div', { class: 'absent-info' }, `Sie sind ${absLabel(mineAbs)}.`) : null,
+    isMgr() && abs.length ? h('div', { class: 'small absent-info' }, `Abwesend: ${abs.map((a) => `${a.name} (${absLabel(a)})`).join(', ')}`) : null);
+  const blocks = activeUnits.map((unit) => {
+    const cards = shownTypes.map((t) => {
+      const s = byKey.get(`${day}|${unit.id}|${t.id}`);
+      if (!s) return null;
+      return h('div', { class: 'phone-shift' },
+        h('div', { class: 'phone-shift-head' }, h('span', { class: 'chip', style: { background: t.color } }, t.code),
+          h('strong', {}, t.name), h('span', { class: 'muted small' }, `${s.start_time}–${s.end_time}`)),
+        renderCell(s, staffUsers));
+    }).filter(Boolean);
+    return cards.length ? h('section', {}, h('h3', {}, unit.name), cards) : null;
+  });
+  setMain(h('div', { class: 'card phone-plan' }, nav, unitSelect, chips, empty, head,
+    blocks.some(Boolean) ? blocks : (empty ? null : h('p', { class: 'muted' }, 'An diesem Tag sind keine Dienste angelegt.'))));
 }
 
 function isoWeek(iso) {
@@ -229,7 +287,9 @@ function absentOn(date) {
   return (state.planAbsences || []).filter((a) => a.from_date <= date && a.to_date >= date);
 }
 function absLabel(a) {
-  return a.type === 'krank' ? 'krank' : a.status === 'beantragt' ? 'Urlaub beantragt' : 'Urlaub';
+  if (a.type === 'krank') return 'krank';
+  const t = a.type === 'sonderurlaub' ? 'Sonderurlaub' : 'Urlaub';
+  return a.status === 'beantragt' ? `${t} beantragt` : t;
 }
 
 function renderCell(s, staffUsers) {
@@ -378,7 +438,7 @@ function monthToolbar(rerender) {
 function zuschlagTable(rows, withName) {
   const cols = [
     ...(withName ? [['name', 'Name', false], ['qualification', 'Qualifikation', false]] : []),
-    ['soll', 'Soll', true], ['gearbeitet', 'Gearbeitet', true], ['urlaub_std', 'Urlaub', true], ['krank_std', 'Krank', true],
+    ['soll', 'Soll', true], ['gearbeitet', 'Gearbeitet', true], ['urlaub_std', 'Urlaub', true], ['sonder_std', 'Sonderurlaub', true], ['krank_std', 'Krank', true],
     ['ist', 'Ist gesamt', true], ['saldo', 'Saldo', true],
     ...(withName ? [['min_hours_month', 'Mindest-Std.', true]] : []),
     ['dienste', 'Dienste', true, 0], ['nachtschichten', 'Nachtschichten', true, 0],
@@ -487,14 +547,21 @@ function staffForm(u) {
       f('min_hours_month', 'Mindestverfügbarkeit (Std./Monat)', { type: 'number', step: '0.5', min: 0, value: u?.min_hours_month ?? 0 }),
       f('stundenentgelt', 'Stundenentgelt € (für Zuschläge)', { type: 'number', step: '0.01', min: 0, value: u?.stundenentgelt ?? 0 }),
       f('urlaubstage_jahr', 'Urlaubstage pro Jahr', { type: 'number', step: '0.5', min: 0, value: u?.urlaubstage_jahr ?? state.settings.urlaubstage_standard }),
+      h('label', { class: 'check', style: { alignSelf: 'center' } }, h('input', { type: 'checkbox', name: 'schwerbehindert', checked: !!u?.schwerbehindert }),
+        'Schwerbehinderung (GdB ≥ 50)'),
+      f('zusatzurlaub_tage', 'Zusatzurlaub (Tage/Jahr)', { type: 'number', step: '0.5', min: 0, value: u?.schwerbehindert ? u.zusatzurlaub_tage : 5 }),
       u ? h('label', {}, 'Status', h('select', { name: 'active' }, h('option', { value: '1', selected: u.active }, 'aktiv'), h('option', { value: '0', selected: !u.active }, 'inaktiv'))) : null),
 
+    h('p', { class: 'small muted' }, 'Zusatzurlaub nach § 208 SGB IX: 5 Arbeitstage bei 5-Tage-Woche; im Jahr der Feststellung anteilig 1/12 je vollem Monat (ggf. hier anpassen). ',
+      'Gleichgestellte (GdB 30/40) haben keinen Anspruch. Die Angabe ist vertraulich und nur für die Einsatzplanung sichtbar. '),
     h('p', { class: 'small muted' }, 'Stundenentgelt: Stundenentgelt der Stufe 3 der jeweiligen Entgeltgruppe (Bemessungsgrundlage der Zeitzuschläge nach § 8 TVöD).'),
     h('div', { class: 'toolbar' }, h('button', { type: 'submit' }, u ? 'Speichern' : 'Anlegen'),
       u ? h('button', { type: 'button', class: 'ghost', onclick: () => renderStaff() }, 'Abbrechen') : null));
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const data = Object.fromEntries(new FormData(form));
+    data.schwerbehindert = form.querySelector('[name=schwerbehindert]').checked;
+    if (!data.schwerbehindert) delete data.zusatzurlaub_tage;
     if (u && !data.password) delete data.password;
     if ('active' in data) data.active = data.active === '1';
     try {
@@ -677,7 +744,8 @@ const STATUS = {
   beantragt: ['warn', 'beantragt'], genehmigt: ['ok', 'genehmigt'], abgelehnt: ['bad', 'abgelehnt'], gemeldet: ['warn', 'krankgemeldet'],
 };
 const statusBadge = (a) => h('span', { class: `badge ${STATUS[a.status][0]}` }, STATUS[a.status][1]);
-const typeLabel = (a) => (a.type === 'krank' ? 'Krankheit' : 'Urlaub');
+const ABS_LABEL = { urlaub: 'Erholungsurlaub', zusatzurlaub: 'Zusatzurlaub (Schwerbehinderung)', sonderurlaub: 'Sonderurlaub', krank: 'Krankheit' };
+const typeLabel = (a) => ABS_LABEL[a.type] || a.type;
 const range = (a) => (a.from_date === a.to_date ? fmtDate(a.from_date) : `${fmtDate(a.from_date)} – ${fmtDate(a.to_date)}`);
 const fmtSize = (b) => (b > 1024 * 1024 ? `${fmtNum(b / 1024 / 1024, 1)} MB` : `${Math.ceil(b / 1024)} KB`);
 
@@ -736,23 +804,37 @@ function absenceForm(type, onSaved, users) {
   const today = todayIso();
   const userSel = users ? h('select', { required: true }, h('option', { value: '' }, '– Person wählen –'),
     users.map((u) => h('option', { value: u.id }, u.name))) : null;
-  const typeSel = users ? h('select', {}, h('option', { value: 'urlaub' }, 'Urlaub (genehmigt)'), h('option', { value: 'krank' }, 'Krankheit')) : null;
+  let typeSel = null;
+  if (users) {
+    typeSel = h('select', {}, ['urlaub', 'zusatzurlaub', 'sonderurlaub', 'krank'].map((t) => h('option', { value: t }, ABS_LABEL[t])));
+  } else if (type !== 'krank') {
+    typeSel = h('select', {}, h('option', { value: 'urlaub' }, ABS_LABEL.urlaub),
+      state.me.schwerbehindert ? h('option', { value: 'zusatzurlaub' }, ABS_LABEL.zusatzurlaub) : null,
+      h('option', { value: 'sonderurlaub' }, 'Sonderurlaub (Arbeitsbefreiung)'));
+  }
   const from = h('input', { type: 'date', required: true, value: type === 'krank' ? today : '' });
   const to = h('input', { type: 'date', required: true, value: type === 'krank' ? today : '' });
   from.addEventListener('change', () => { if (!to.value || to.value < from.value) to.value = from.value; });
   const note = h('input', { placeholder: type === 'krank' ? 'optional' : 'optional, z. B. Familienurlaub', maxlength: 500 });
+  const noteLabel = h('span', {}, 'Bemerkung');
+  typeSel?.addEventListener('change', () => {
+    const sonder = typeSel.value === 'sonderurlaub';
+    noteLabel.textContent = sonder ? 'Anlass (Pflicht)' : 'Bemerkung';
+    note.placeholder = sonder ? 'z. B. Umzug, Hochzeit, Niederkunft der Partnerin' : 'optional';
+    note.required = sonder;
+  });
   const form = h('form', { class: 'row' },
     userSel ? h('label', {}, 'Mitarbeiter/in', userSel) : null, typeSel ? h('label', {}, 'Art', typeSel) : null,
     h('label', {}, type === 'krank' ? 'krank seit' : 'von', from),
     h('label', {}, type === 'krank' ? 'voraussichtlich bis' : 'bis', to),
-    h('label', {}, 'Bemerkung', note),
-    h('button', { type: 'submit' }, users ? 'Eintragen' : type === 'krank' ? 'Krank melden' : 'Urlaub beantragen'));
+    h('label', {}, noteLabel, note),
+    h('button', { type: 'submit' }, users ? 'Eintragen' : type === 'krank' ? 'Krank melden' : 'Beantragen'));
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const t = typeSel ? typeSel.value : type;
     try {
       const r = await api('POST', '/api/absences', { type: t, from: from.value, to: to.value, note: note.value, user_id: userSel?.value || undefined });
-      let msg = t === 'krank' ? 'Krankmeldung gespeichert.' : users ? 'Urlaub eingetragen.' : `Urlaubsantrag über ${r.arbeitstage} Arbeitstage gestellt.`;
+      let msg = t === 'krank' ? 'Krankmeldung gespeichert.' : users ? `${ABS_LABEL[t]} eingetragen.` : `Antrag (${ABS_LABEL[t]}) über ${r.arbeitstage} Arbeitstage gestellt.`;
       if (r.removed) msg += ` ${r.removed} Dienst(e) wurden ausgetragen.`;
       toast(msg);
       if (t === 'krank' && r.au_erforderlich && !users) {
@@ -767,35 +849,40 @@ function absenceForm(type, onSaved, users) {
 async function renderMyAbsences() {
   const year = Number(todayIso().slice(0, 4));
   const r = await api('GET', `/api/absences?year=${year}`);
-  const u = r.urlaub;
-  const pct = u.anspruch ? Math.min(100, ((u.genehmigt + u.beantragt) / u.anspruch) * 100) : 0;
+  const kontoCard = (title, k, hint) => {
+    const pct = k.anspruch ? Math.min(100, ((k.genehmigt + k.beantragt) / k.anspruch) * 100) : 0;
+    return h('div', { class: 'card' }, h('h2', {}, `${title} ${k.jahr}`),
+      h('div', { class: 'stat' }, `${fmtNum(k.rest, 1)} Tage übrig`),
+      h('div', { class: 'progress' }, h('div', { style: { width: pct + '%' } })),
+      h('p', { class: 'small muted' }, `Anspruch ${fmtNum(k.anspruch, 1)} · genehmigt ${k.genehmigt} · beantragt ${k.beantragt} (Arbeitstage)`),
+      hint ? h('p', { class: 'small muted' }, hint) : null);
+  };
   setMain(
     h('div', { class: 'grid-2' },
-      h('div', { class: 'card' }, h('h2', {}, `Urlaubskonto ${u.jahr}`),
-        h('div', { class: 'stat' }, `${fmtNum(u.rest, 1)} Tage übrig`),
-        h('div', { class: 'progress' }, h('div', { style: { width: pct + '%' } })),
-        h('p', { class: 'small muted' }, `Anspruch ${fmtNum(u.anspruch, 1)} · genehmigt ${u.genehmigt} · beantragt ${u.beantragt} (Arbeitstage)`)),
+      kontoCard('Urlaubskonto', r.urlaub),
+      r.zusatzurlaub ? kontoCard('Zusatzurlaub', r.zusatzurlaub, 'Zusatzurlaub für schwerbehinderte Menschen nach § 208 SGB IX.') : null,
       h('div', { class: 'card' }, h('h2', {}, 'Krankmeldung'),
         h('p', { class: 'small muted' }, `Bitte melden Sie sich zusätzlich telefonisch auf der Station ab. Ab dem ${r.au_ab_tag}. Krankheitstag ist eine `,
           'Arbeitsunfähigkeitsbescheinigung (AU) hochzuladen (PDF oder Foto). Bereits eingetragene Dienste im Zeitraum werden automatisch ausgetragen.'),
         absenceForm('krank', renderMyAbsences))),
     h('div', { class: 'card' }, h('h2', {}, 'Urlaub beantragen'),
-      h('p', { class: 'small muted' }, 'Der Antrag geht an die Einsatzplanung. Gezählt werden Arbeitstage (Mo–Fr ohne Feiertage). Nach der Genehmigung werden Dienste im Zeitraum ausgetragen.'),
+      h('p', { class: 'small muted' }, 'Der Antrag geht an die Einsatzplanung. Gezählt werden Arbeitstage (Mo–Fr ohne Feiertage). Nach der Genehmigung werden Dienste im Zeitraum ausgetragen. ',
+        'Sonderurlaub (Arbeitsbefreiung nach § 29 TVöD, z. B. bei Umzug oder Niederkunft der Ehefrau/Partnerin) bitte mit Anlass beantragen.'),
       absenceForm('urlaub', renderMyAbsences)),
     h('div', { class: 'card' }, h('h2', {}, 'Meine Einträge'),
       r.absences.length ? h('div', { class: 'table-wrap' }, h('table', {},
         h('thead', {}, h('tr', {}, ['Art', 'Zeitraum', 'Tage', 'Status', 'Bemerkung', 'Bescheinigung', ''].map((x) => h('th', {}, x)))),
         h('tbody', {}, r.absences.map((a) => h('tr', {},
           h('td', {}, typeLabel(a)), h('td', {}, range(a)),
-          h('td', { class: 'num' }, a.type === 'urlaub' ? `${a.arbeitstage} AT` : `${a.kalendertage} KT`),
+          h('td', { class: 'num' }, a.type !== 'krank' ? `${a.arbeitstage} AT` : `${a.kalendertage} KT`),
           h('td', {}, statusBadge(a)),
           h('td', {}, a.note, a.decision_note ? h('div', { class: 'small muted' }, `Einsatzplanung: ${a.decision_note}`) : null),
           h('td', {}, auStatus(a), attachmentList(a, true)),
           h('td', { class: 'actions' },
             a.type === 'krank' ? uploadButton(a) : null,
             a.type === 'krank' ? h('button', { class: 'tiny ghost', onclick: () => extendSickness(a) }, 'Verlängern') : null,
-            a.type === 'urlaub' && a.status === 'beantragt' ? h('button', { class: 'tiny danger', onclick: async () => {
-              if (!confirm('Urlaubsantrag zurückziehen?')) return;
+            a.type !== 'krank' && a.status === 'beantragt' ? h('button', { class: 'tiny danger', onclick: async () => {
+              if (!confirm('Antrag zurückziehen?')) return;
               try { await api('DELETE', `/api/absences/${a.id}`); toast('Zurückgezogen.'); renderMyAbsences(); } catch (e) { toast(e.message, true); }
             } }, 'Zurückziehen') : null))))))
         : h('p', { class: 'muted' }, 'Keine Einträge.')),
@@ -815,11 +902,11 @@ async function renderAbsencesMgr() {
   const decide = async (a, status) => {
     let note = '';
     if (status === 'abgelehnt') {
-      note = askReason(`Urlaubsantrag von ${a.name} (${range(a)}) ablehnen.\n\nBegründung:`, true);
+      note = askReason(`Antrag auf ${typeLabel(a)} von ${a.name} (${range(a)}) ablehnen.\n\nBegründung:`, true);
       if (note === null) return;
     } else {
       const extra = a.konflikte ? `\n\nAchtung: ${a.name} ist in ${a.konflikte} Dienst(en) eingetragen. Diese werden ausgetragen.` : '';
-      if (!confirm(`Urlaub von ${a.name} (${range(a)}, ${a.arbeitstage} Arbeitstage) genehmigen?${extra}`)) return;
+      if (!confirm(`${typeLabel(a)} von ${a.name} (${range(a)}, ${a.arbeitstage} Arbeitstage) genehmigen?${extra}`)) return;
     }
     try {
       const r = await api('PUT', `/api/absences/${a.id}/decision`, { status, note });
@@ -828,14 +915,14 @@ async function renderAbsencesMgr() {
     refresh();
   };
   const sick = inMonth.absences.filter((a) => a.type === 'krank');
-  const vac = inMonth.absences.filter((a) => a.type === 'urlaub' && a.status !== 'beantragt');
+  const vac = inMonth.absences.filter((a) => a.type !== 'krank' && a.status !== 'beantragt');
   const auMissing = (await api('GET', '/api/absences')).absences.filter((a) => a.au_ueberfaellig);
   setMain(
-    h('div', { class: 'card' }, h('h2', {}, `Offene Urlaubsanträge (${open.absences.length})`),
+    h('div', { class: 'card' }, h('h2', {}, `Offene Anträge (${open.absences.length})`),
       open.absences.length ? h('div', { class: 'table-wrap' }, h('table', {},
-        h('thead', {}, h('tr', {}, ['Mitarbeiter/in', 'Zeitraum', 'Arbeitstage', 'Bemerkung', 'eingetragen in', ''].map((x) => h('th', {}, x)))),
+        h('thead', {}, h('tr', {}, ['Mitarbeiter/in', 'Art', 'Zeitraum', 'Arbeitstage', 'Bemerkung / Anlass', 'eingetragen in', ''].map((x) => h('th', {}, x)))),
         h('tbody', {}, open.absences.map((a) => h('tr', {},
-          h('td', {}, a.name, h('div', { class: 'small muted' }, a.qualification)), h('td', {}, range(a)), h('td', { class: 'num' }, a.arbeitstage),
+          h('td', {}, a.name, h('div', { class: 'small muted' }, a.qualification)), h('td', {}, typeLabel(a)), h('td', {}, range(a)), h('td', { class: 'num' }, a.arbeitstage),
           h('td', {}, a.note), h('td', {}, a.konflikte ? h('span', { class: 'badge warn' }, `${a.konflikte} Dienst(en)`) : '–'),
           h('td', { class: 'actions' },
             h('button', { class: 'tiny', onclick: () => decide(a, 'genehmigt') }, 'Genehmigen'),
@@ -859,14 +946,14 @@ async function renderAbsencesMgr() {
               try { await api('DELETE', `/api/absences/${a.id}`); toast('Gelöscht.'); refresh(); } catch (e) { toast(e.message, true); }
             } }, 'Löschen')))))))
         : h('p', { class: 'muted' }, 'Keine.'),
-      h('h3', {}, `Urlaub (${vac.length})`),
+      h('h3', {}, `Urlaub und Sonderurlaub (${vac.length})`),
       vac.length ? h('div', { class: 'table-wrap' }, h('table', {},
-        h('thead', {}, h('tr', {}, ['Mitarbeiter/in', 'Zeitraum', 'Arbeitstage', 'Status', 'Bemerkung', ''].map((x) => h('th', {}, x)))),
+        h('thead', {}, h('tr', {}, ['Mitarbeiter/in', 'Art', 'Zeitraum', 'Arbeitstage', 'Status', 'Bemerkung', ''].map((x) => h('th', {}, x)))),
         h('tbody', {}, vac.map((a) => h('tr', {},
-          h('td', {}, a.name), h('td', {}, range(a)), h('td', { class: 'num' }, a.arbeitstage), h('td', {}, statusBadge(a)),
+          h('td', {}, a.name), h('td', {}, typeLabel(a)), h('td', {}, range(a)), h('td', { class: 'num' }, a.arbeitstage), h('td', {}, statusBadge(a)),
           h('td', {}, a.note, a.decision_note ? h('div', { class: 'small muted' }, a.decision_note) : null),
           h('td', {}, h('button', { class: 'tiny danger', onclick: async () => {
-            if (!confirm(`Urlaubseintrag von ${a.name} (${range(a)}) löschen?`)) return;
+            if (!confirm(`${typeLabel(a)} von ${a.name} (${range(a)}) löschen?`)) return;
             try { await api('DELETE', `/api/absences/${a.id}`); toast('Gelöscht.'); refresh(); } catch (e) { toast(e.message, true); }
           } }, 'Löschen')))))))
         : h('p', { class: 'muted' }, 'Keiner.')),
@@ -893,7 +980,7 @@ async function renderLog() {
           r.details.status ? h('div', { class: 'small muted' }, r.details.status) : null),
         h('td', {}, r.person || '–'),
         h('td', {}, r.shift ? `${r.shift.code} ${fmtDate(r.shift.date)} · ${r.shift.unit_name}`
-          : r.details.from ? `${r.details.type === 'krank' ? 'Krank' : r.details.type === 'urlaub' ? 'Urlaub' : ''} ${fmtDate(r.details.from)} – ${fmtDate(r.details.to)}` : '–'),
+          : r.details.from ? `${ABS_LABEL[r.details.type] || ''} ${fmtDate(r.details.from)} – ${fmtDate(r.details.to)}` : '–'),
         h('td', {}, r.actor),
         h('td', {}, r.reason || (r.details.filename ? r.details.filename : '–')))))))));
 }
@@ -1030,6 +1117,11 @@ async function renderAccount() {
       : [h('p', {}, h('span', { class: 'badge warn' }, 'nicht eingerichtet')),
         h('p', {}, h('button', { onclick: () => renderSetup(true) }, 'Jetzt einrichten'))]);
   setMain(form, twofa);
+}
+
+// Als App installierbar (Startbildschirm); der Service Worker speichert nur die Programmdateien, keine Personaldaten
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
 boot();

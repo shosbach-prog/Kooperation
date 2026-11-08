@@ -61,7 +61,9 @@ CREATE TABLE IF NOT EXISTS users (
   recovery_codes TEXT NOT NULL DEFAULT '[]',
   failed_logins INTEGER NOT NULL DEFAULT 0,
   locked_until INTEGER NOT NULL DEFAULT 0,
-  urlaubstage_jahr REAL NOT NULL DEFAULT 30
+  urlaubstage_jahr REAL NOT NULL DEFAULT 30,
+  schwerbehindert INTEGER NOT NULL DEFAULT 0,
+  zusatzurlaub_tage REAL NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -130,7 +132,7 @@ CREATE TABLE IF NOT EXISTS qual_rules (
 CREATE TABLE IF NOT EXISTS absences (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  type TEXT NOT NULL CHECK (type IN ('urlaub','krank')),
+  type TEXT NOT NULL CHECK (type IN ('urlaub','zusatzurlaub','sonderurlaub','krank')),
   from_date TEXT NOT NULL,
   to_date TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('beantragt','genehmigt','abgelehnt','gemeldet')),
@@ -225,6 +227,26 @@ function migrate(db) {
   add('users', 'locked_until INTEGER NOT NULL DEFAULT 0');
   add('sessions', "stage TEXT NOT NULL DEFAULT 'full'");
   add('users', 'urlaubstage_jahr REAL NOT NULL DEFAULT 30');
+  add('users', 'schwerbehindert INTEGER NOT NULL DEFAULT 0');
+  add('users', 'zusatzurlaub_tage REAL NOT NULL DEFAULT 0');
+  // Abwesenheitsarten erweitern (CHECK-Bedingung erfordert Neuaufbau der Tabelle)
+  const absSql = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'absences'").get()?.sql || '';
+  if (!absSql.includes('zusatzurlaub')) {
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.exec('BEGIN');
+    try {
+      // Vorgehen nach https://www.sqlite.org/lang_altertable.html#otheralter:
+      // neue Tabelle anlegen, Daten kopieren, alte löschen, neue umbenennen
+      const create = SCHEMA.match(/CREATE TABLE IF NOT EXISTS absences \([\s\S]*?\n\);/)[0]
+        .replace('CREATE TABLE IF NOT EXISTS absences', 'CREATE TABLE absences_neu');
+      db.exec(`${create}
+        INSERT INTO absences_neu SELECT * FROM absences;
+        DROP TABLE absences;
+        ALTER TABLE absences_neu RENAME TO absences;`);
+      if (db.prepare('PRAGMA foreign_key_check').all().length) throw new Error('Migration absences: Fremdschlüssel verletzt');
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; } finally { db.exec('PRAGMA foreign_keys = ON'); }
+  }
   // Name der Einrichtung aus der ersten Prototyp-Version korrigieren
   db.prepare("UPDATE settings SET value = ? WHERE key = 'klinik_name' AND value = ?")
     .run(JSON.stringify('LWL-Klinik Dortmund'), JSON.stringify('KWL Klinik Dortmund'));

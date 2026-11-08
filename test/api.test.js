@@ -346,3 +346,57 @@ test('Einstellungen: Qualifikationsliste und Begründungspflicht', async () => {
   assert.equal((await mgr('PUT', '/api/settings', { qualifikationen: 'x' })).status, 400);
   await mgr('PUT', '/api/settings', { begruendung_eintragen: false });
 });
+
+test('Zusatzurlaub bei Schwerbehinderung (§ 208 SGB IX) und Sonderurlaub', async () => {
+  const mgr = client();
+  const julia = client();
+  await login(mgr, 'manager', 'manager123');
+  await login(julia, 'jschmitz', 'demo123');
+  const year = new Date().getUTCFullYear() + 1; // nächstes Jahr: keine Überschneidung mit anderen Tests
+  const mon = (() => { for (let d = 10; ; d++) { const x = `${year}-03-${String(d).padStart(2, '0')}`; if (new Date(x).getUTCDay() === 1) return x; } })();
+  const fri = new Date(Date.parse(mon) + 4 * 86400000).toISOString().slice(0, 10);
+
+  // ohne hinterlegte Schwerbehinderung kein Zusatzurlaub
+  let r = await julia('POST', '/api/absences', { type: 'zusatzurlaub', from: mon, to: mon });
+  assert.equal(r.status, 400);
+
+  const juliaId = (await mgr('GET', '/api/users')).data.find((u) => u.username === 'jschmitz').id;
+  r = await mgr('PUT', `/api/users/${juliaId}`, { schwerbehindert: true });
+  assert.equal(r.data.schwerbehindert, true);
+  assert.equal(r.data.zusatzurlaub_tage, 5); // Standard nach § 208 SGB IX
+
+  r = await julia('GET', `/api/absences?year=${year}`);
+  assert.equal(r.data.zusatzurlaub.anspruch, 5);
+  assert.equal(r.data.urlaub.anspruch, 30);
+
+  // 5 Tage Zusatzurlaub gehen, ein 6. Tag nicht (Kontingent)
+  r = await julia('POST', '/api/absences', { type: 'zusatzurlaub', from: mon, to: fri });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.arbeitstage, 5);
+  const nextMon = new Date(Date.parse(mon) + 7 * 86400000).toISOString().slice(0, 10);
+  r = await julia('POST', '/api/absences', { type: 'zusatzurlaub', from: nextMon, to: nextMon });
+  assert.equal(r.data.code, 'KONTINGENT');
+  // Erholungsurlaub ist davon unabhängig
+  r = await julia('GET', `/api/absences?year=${year}`);
+  assert.equal(r.data.zusatzurlaub.rest, 0);
+  assert.equal(r.data.urlaub.rest, 30);
+
+  // Sonderurlaub braucht einen Anlass
+  r = await julia('POST', '/api/absences', { type: 'sonderurlaub', from: nextMon, to: nextMon });
+  assert.equal(r.data.code, 'BEGRUENDUNG');
+  r = await julia('POST', '/api/absences', { type: 'sonderurlaub', from: nextMon, to: nextMon, note: 'Umzug' });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.status, 'beantragt');
+  const sonderId = r.data.id;
+
+  // Manager genehmigt, Zeitkonto rechnet Sonderurlaub separat an
+  r = await mgr('PUT', `/api/absences/${sonderId}/decision`, { status: 'genehmigt' });
+  assert.equal(r.data.status, 'genehmigt');
+  r = await julia('GET', `/api/report?month=${nextMon.slice(0, 7)}`);
+  assert.equal(r.data.rows[0].sonder_tage, 1);
+  assert.ok(Math.abs(r.data.rows[0].sonder_std - 30 / 5) < 0.01); // Julia: 30 Wochenstunden
+
+  // Schwerbehinderung zurücknehmen setzt Zusatzurlaub auf 0
+  r = await mgr('PUT', `/api/users/${juliaId}`, { schwerbehindert: false });
+  assert.equal(r.data.zusatzurlaub_tage, 0);
+});

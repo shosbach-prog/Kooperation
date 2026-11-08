@@ -122,9 +122,67 @@ textarea { width: 100%; font: inherit; }
 #toast.show { opacity: 1; }
 #toast.err { background: var(--bad); color: #fff; }
 
-@media (max-width: 700px) {
-  main { padding: .5rem; }
-  #tabs { order: 3; width: 100%; }
+/* ---------- Handy ---------- */
+.phone-nav { display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem; }
+.phone-nav strong { flex: 1; text-align: center; }
+.phone-nav button { min-width: 44px; min-height: 40px; }
+.phone-plan > select { width: 100%; margin-bottom: .5rem; }
+.day-chips { display: grid; grid-template-columns: repeat(7, 1fr); gap: .25rem; margin-bottom: .75rem; }
+.day-chip { display: flex; flex-direction: column; align-items: center; padding: .35rem 0; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; position: relative; min-height: 52px; }
+.day-chip .wd { font-size: .7rem; color: var(--muted); }
+.day-chip .dn { font-size: 1.1rem; font-weight: 700; }
+.day-chip.active { background: var(--primary); border-color: var(--primary); color: var(--primary-ink); }
+.day-chip.active .wd { color: inherit; }
+.day-chip.holiday .dn { color: var(--bad); }
+.day-chip.active.holiday .dn { color: inherit; }
+.day-chip .dot { position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; }
+.dot.mine { background: var(--ok); }
+.dot.gap { background: var(--bad); }
+.phone-day h2 { margin-bottom: .25rem; }
+.holiday-text { color: var(--bad); }
+.phone-plan section h3 { margin: 1rem 0 .4rem; }
+.phone-shift { margin-bottom: .6rem; }
+.phone-shift-head { display: flex; align-items: center; gap: .4rem; margin-bottom: .25rem; }
+.phone-shift-head .muted { margin-left: auto; }
+.phone-shift .cell { min-height: 0; font-size: .95rem; }
+.phone-shift .cell button { min-height: 40px; font-size: .95rem; }
+.phone-shift .cell select { min-height: 40px; font-size: .95rem; }
+
+@media (max-width: 760px) {
+  body { font-size: 16px; }
+  main { padding: .5rem; padding-bottom: calc(1rem + env(safe-area-inset-bottom)); }
+  .card { padding: .75rem; }
+  #topbar { gap: .4rem; padding: .4rem .6rem; padding-top: calc(.4rem + env(safe-area-inset-top)); }
+  .brand { font-size: .95rem; }
+  .who { margin-left: auto; }
+  .who #who { display: none; }
+  /* Menü als waagrecht wischbare Leiste */
+  #tabs { order: 3; flex: 0 0 100%; width: 100%; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  #tabs::-webkit-scrollbar { display: none; }
+  #tabs button { white-space: nowrap; padding: .5rem .75rem; }
+  /* Eingaben groß genug zum Tippen; 16px verhindert das Hineinzoomen auf dem iPhone */
+  input, select, textarea, button { font-size: 16px; min-height: 42px; }
+  input[type="checkbox"] { min-height: 0; width: 1.3em; height: 1.3em; }
+  button.tiny { min-height: 36px; padding: .3rem .7rem; font-size: .9rem; }
+  .row { flex-direction: column; align-items: stretch; }
+  .row > label, .row > button { width: 100%; }
+  .row input[type="number"] { width: 100%; }
+  .grid-2 { grid-template-columns: 1fr; }
+  .stat { font-size: 1.4rem; }
+  .login { margin: 4vh auto; }
+  .codes { columns: 1; }
+  /* Tabellen als Karten */
+  table.stack thead { display: none; }
+  table.stack, table.stack tbody, table.stack tr, table.stack td { display: block; width: 100%; }
+  table.stack tr { border: 1px solid var(--line); border-radius: 8px; padding: .4rem .6rem; margin-bottom: .6rem; background: var(--card); }
+  table.stack td { border: 0; padding: .3rem 0 .3rem 40%; position: relative; text-align: right !important; min-height: 1.8em; }
+  table.stack td::before { content: attr(data-label); position: absolute; left: 0; top: .35rem; width: 38%; text-align: left; color: var(--muted); font-size: .8rem; }
+  table.stack td:not([data-label]), table.stack td[data-label=""] { padding-left: 0; }
+  table.stack td:not([data-label])::before, table.stack td[data-label=""]::before { display: none; }
+  table.stack td.actions { display: flex; justify-content: flex-start; flex-wrap: wrap; gap: .4rem; padding-top: .5rem; }
+  table.stack ul.files li { justify-content: flex-end; }
+  .table-wrap { overflow: visible; }
+  .toolbar { gap: .4rem; }
 }
 @media print {
   #topbar, .toolbar button, .cell button, .cell select { display: none !important; }

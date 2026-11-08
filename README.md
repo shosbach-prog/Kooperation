@@ -25,9 +25,18 @@ Arbeitszeit wird angelehnt an den **TVöD (BT-K)** angerechnet.
 - Melden sich **selbst für Dienste an** und tragen sich **selbst wieder aus**, jeweils **mit Begründung** (Pflicht beim Austragen, beim Eintragen einstellbar)
 - Austragen ist nur bis zur eingestellten Frist möglich (Standard: 72 Std. vor Dienstbeginn) und nur, wenn weder die Mindestbesetzung noch die Qualifikationsregeln verletzt werden
 - **Urlaub beantragen** mit Urlaubskonto (Anspruch, genehmigt, beantragt, Rest); offene Anträge können zurückgezogen werden
+- **Zusatzurlaub für schwerbehinderte Menschen** (§ 208 SGB IX, 5 Arbeitstage bei 5-Tage-Woche) mit eigenem Konto, sobald die Einsatzplanung die Schwerbehinderung hinterlegt hat
+- **Sonderurlaub** (Arbeitsbefreiung nach § 29 TVöD) mit Pflichtangabe des Anlasses; wird genehmigt wie Urlaub
 - **Krank melden** und Krankmeldung verlängern; ab dem eingestellten Krankheitstag (Standard: 4. Tag, EFZG § 5) wird die **AU-Bescheinigung hochgeladen** (PDF, JPG oder PNG, max. 10 MB, auch als Handyfoto)
 - **Meine Dienste:** Übersicht der kommenden Dienste
 - **Stundenkonto:** Soll/Ist, Fortschritt zur Mindestverfügbarkeit, Zuschläge
+
+**Auf dem privaten Handy**
+- Die Oberfläche passt sich an das Handy an: Dienstplan als **Tagesansicht** mit Wochenleiste (grüner Punkt = eigener Dienst, roter Punkt = Lücke), große Schaltflächen, Listen als Karten
+- **Als App installierbar:** iPhone (Safari → Teilen → „Zum Home-Bildschirm“) bzw. Android (Chrome → Menü → „App installieren“); keine App-Store-Installation nötig
+- Es werden **keine Dienstplan- oder Personaldaten auf dem Handy gespeichert**; offline zeigt die App nur die leere Hülle
+- AU-Bescheinigung direkt mit der Handykamera fotografieren und hochladen
+- Die Authenticator-App für die 2FA kann auf demselben Handy laufen
 
 **Anmeldung mit Zwei-Faktor-Authentifizierung (2FA)**
 - Anmeldung mit Passwort **und** einem 6-stelligen Code aus einer Authenticator-App (TOTP nach RFC 6238), z. B. Microsoft Authenticator, Google Authenticator oder FreeOTP
@@ -61,6 +70,8 @@ Arbeitszeit wird angelehnt an den **TVöD (BT-K)** angerechnet.
 | Feiertage | gesetzliche Feiertage NRW, automatisch berechnet |
 | Urlaub / Krankheit (§ 6 Abs. 3, §§ 21, 22, 26) | je Arbeitstag 1/5 der Wochenarbeitszeit angerechnet (vereinfacht) |
 | Urlaubsanspruch (§ 26) | 30 Arbeitstage bei 5-Tage-Woche (je Person einstellbar) |
+| Zusatzurlaub (§ 208 SGB IX) | 5 Arbeitstage bei Schwerbehinderung (je Person einstellbar, z. B. anteilig im ersten Jahr) |
+| Sonderurlaub (§ 29 TVöD) | bezahlte Arbeitsbefreiung, im Zeitkonto gesondert ausgewiesen |
 | Euro-Betrag | Stunden × Prozentsatz × hinterlegtes Stundenentgelt (Stufe 3 der Entgeltgruppe) |
 
 Die Pause wird nicht als Arbeitszeit angerechnet und anteilig von den
@@ -93,10 +104,16 @@ Halten Sie dafür ein Handy mit Authenticator-App bereit.
 
 Die Passwörter bitte **vor jedem echten Einsatz ändern**.
 
-### Betrieb im Kliniknetz
+### Betrieb im Kliniknetz und Zugriff vom privaten Handy
+
+Damit die Kolleginnen und Kollegen vom privaten Handy zugreifen können, muss die Anwendung **aus dem Internet erreichbar** sein
+(z. B. über den Reverse-Proxy der IT unter einer eigenen Adresse wie `dienstplan.example.de`). Die Zwei-Faktor-Anmeldung ist dafür
+die Voraussetzung und sollte Pflicht bleiben. Die Installation als App funktioniert nur über **HTTPS**.
+
 
 - Die Anwendung **nur über HTTPS** bereitstellen, z. B. hinter dem vorhandenen Reverse-Proxy, und dann `COOKIE_SECURE=1` setzen.
 - Die Uhrzeit des Servers muss stimmen (NTP), sonst werden die 2FA-Codes abgelehnt.
+- Die Angabe einer **Schwerbehinderung** ist ebenfalls ein Gesundheitsdatum; sie ist nur für die Einsatzplanung sichtbar (und für die Person selbst über ihr Zusatzurlaubskonto). Mitarbeitende sind nicht verpflichtet, sie in diesem System anzugeben.
 - Die AU-Bescheinigungen sind **Gesundheitsdaten** (Art. 9 DSGVO). Sie liegen außerhalb des Web-Verzeichnisses, und nur die betroffene Person und die Einsatzplanung können sie abrufen. Legen Sie Löschfristen fest.
 - Die Datenbankdatei (`data/`) enthält Personaldaten. Sie gehört in die Datensicherung und muss vor fremdem Zugriff geschützt werden.
 - Vor dem Echtbetrieb Datenschutzbeauftragte/n und Personalrat einbinden (Dienstplanung ist mitbestimmungspflichtig).
@@ -134,7 +151,7 @@ src/app.js         REST-API (Express), Berechtigungen, Planungsregeln
 src/db.js          SQLite-Schema, Startdaten, Passwort-Hashing (scrypt)
 src/totp.js        Einmalcodes für die Zwei-Faktor-Anmeldung (RFC 6238)
 src/tvoed.js       Feiertage NRW, Soll-Stunden, Zuschlagsberechnung
-public/            Oberfläche (HTML/CSS/JavaScript, ohne Build-Schritt)
+public/            Oberfläche (HTML/CSS/JavaScript, ohne Build-Schritt), App-Manifest, Service Worker
 test/              Tests (node:test)
 ```
 
@@ -142,7 +159,8 @@ test/              Tests (node:test)
 
 - Qualifikationen, die auch andere vertreten dürfen (z. B. Pflegefachkraft zählt als Pflegehilfe)
 - Automatische Löschung von AU-Bescheinigungen nach Ablauf einer Frist
-- Weitere Abwesenheitsarten (Fortbildung, Sonderurlaub, Kind krank)
+- Weitere Abwesenheitsarten (Fortbildung, Kind krank)
+- Push-Benachrichtigungen aufs Handy (z. B. „Urlaub genehmigt“, „Dienst unbesetzt“)
 - Wunschdienste und Tauschbörse unter Kolleginnen und Kollegen
 - Benachrichtigung per E-Mail bei offenen Schichten
 - Wechselschicht- und Schichtzulage (§ 8 Abs. 5/6), Bereitschaftsdienst, Rufbereitschaft

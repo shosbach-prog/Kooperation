@@ -88,7 +88,7 @@ function createApp(db, opts = {}) {
   const publicUser = (u) => ({
     id: u.id, name: u.name, username: u.username, role: u.role, qualification: u.qualification,
     weekly_hours: u.weekly_hours, min_hours_month: u.min_hours_month, stundenentgelt: u.stundenentgelt, active: !!u.active,
-    urlaubstage_jahr: u.urlaubstage_jahr, totp_enabled: !!u.totp_enabled, locked: u.locked_until > Date.now(), recovery_left: JSON.parse(u.recovery_codes || '[]').length,
+    urlaubstage_jahr: u.urlaubstage_jahr, schwerbehindert: !!u.schwerbehindert, zusatzurlaub_tage: u.zusatzurlaub_tage, totp_enabled: !!u.totp_enabled, locked: u.locked_until > Date.now(), recovery_left: JSON.parse(u.recovery_codes || '[]').length,
   });
 
   const startSession = (res, userId, stage) => {
@@ -265,10 +265,14 @@ function createApp(db, opts = {}) {
     }
     if ('role' in b || !partial) { out.role = b.role === 'manager' ? 'manager' : 'staff'; }
     for (const k of ['qualification']) if (k in b) out[k] = String(b[k] || '');
-    for (const k of ['weekly_hours', 'min_hours_month', 'stundenentgelt', 'urlaubstage_jahr']) {
+    for (const k of ['weekly_hours', 'min_hours_month', 'stundenentgelt', 'urlaubstage_jahr', 'zusatzurlaub_tage']) {
       if (k in b) { const v = Number(b[k]); if (!Number.isFinite(v) || v < 0) throw new HttpError(400, `Ungültiger Wert: ${k}`); out[k] = v; }
     }
     if ('active' in b) out.active = b.active ? 1 : 0;
+    if ('schwerbehindert' in b) out.schwerbehindert = b.schwerbehindert ? 1 : 0;
+    // § 208 SGB IX: 5 Arbeitstage Zusatzurlaub bei 5-Tage-Woche, falls nichts anderes angegeben
+    if (out.schwerbehindert === 1 && !('zusatzurlaub_tage' in out)) out.zusatzurlaub_tage = 5;
+    if (out.schwerbehindert === 0) out.zusatzurlaub_tage = 0;
     return out;
   };
 
@@ -281,6 +285,7 @@ function createApp(db, opts = {}) {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(f.name, f.username, hashPassword(pw), f.role, f.qualification || '',
       f.weekly_hours ?? getSettings().wochenstunden_standard, f.min_hours_month ?? 0, f.stundenentgelt ?? 0,
       f.urlaubstage_jahr ?? getSettings().urlaubstage_standard).lastInsertRowid;
+    if (f.schwerbehindert) db.prepare('UPDATE users SET schwerbehindert = 1, zusatzurlaub_tage = ? WHERE id = ?').run(f.zusatzurlaub_tage, id);
     audit(req.user.id, 'user.create', { id, username: f.username });
     return publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id));
   }));
@@ -565,7 +570,7 @@ function createApp(db, opts = {}) {
     }
     const abs = absenceOn(userId, shift.date);
     if (abs) {
-      const what = abs.type === 'krank' ? 'krankgemeldet' : abs.status === 'beantragt' ? 'mit beantragtem Urlaub eingetragen' : 'im Urlaub';
+      const what = abs.type === 'krank' ? 'krankgemeldet' : abs.status === 'beantragt' ? 'mit beantragtem Urlaub eingetragen' : 'im Urlaub / freigestellt';
       throw new HttpError(409, `${isMgr ? target.name + ' ist' : 'Sie sind'} an diesem Tag ${what}.`, 'ABWESEND');
     }
     const count = db.prepare('SELECT COUNT(*) AS n FROM assignments WHERE shift_id = ?').get(shift.id).n;
@@ -631,6 +636,8 @@ function createApp(db, opts = {}) {
   }));
 
   // ---------- Urlaub und Krankheit ----------
+  const ABS_TYPES = ['urlaub', 'zusatzurlaub', 'sonderurlaub', 'krank'];
+  const ABS_LABEL = { urlaub: 'Erholungsurlaub', zusatzurlaub: 'Zusatzurlaub (Schwerbehinderung)', sonderurlaub: 'Sonderurlaub', krank: 'Krankheit' };
   const absenceDays = (a) => (T.parseDate(a.to_date) - T.parseDate(a.from_date)) / T.DAY + 1;
   const auRequired = (a, settings) => a.type === 'krank' && absenceDays(a) >= Number(settings.au_ab_tag || 1);
 
@@ -661,13 +668,14 @@ function createApp(db, opts = {}) {
     return rows.length;
   };
 
-  const urlaubKonto = (u, year) => {
-    const sum = (status) => db.prepare(`SELECT from_date, to_date FROM absences WHERE user_id = ? AND type = 'urlaub' AND status = ?
-      AND from_date <= ? AND to_date >= ?`).all(u.id, status, `${year}-12-31`, `${year}-01-01`)
+  const urlaubKonto = (u, year, type = 'urlaub', excludeId = 0) => {
+    const sum = (status) => db.prepare(`SELECT from_date, to_date FROM absences WHERE user_id = ? AND type = ? AND status = ?
+      AND id <> ? AND from_date <= ? AND to_date >= ?`).all(u.id, type, status, excludeId, `${year}-12-31`, `${year}-01-01`)
       .reduce((acc, a) => acc + T.arbeitstage(a.from_date < `${year}-01-01` ? `${year}-01-01` : a.from_date, a.to_date > `${year}-12-31` ? `${year}-12-31` : a.to_date), 0);
     const genehmigt = sum('genehmigt');
     const beantragt = sum('beantragt');
-    return { jahr: year, anspruch: u.urlaubstage_jahr, genehmigt, beantragt, rest: u.urlaubstage_jahr - genehmigt - beantragt };
+    const anspruch = type === 'zusatzurlaub' ? (u.schwerbehindert ? u.zusatzurlaub_tage : 0) : u.urlaubstage_jahr;
+    return { jahr: year, anspruch, genehmigt, beantragt, rest: anspruch - genehmigt - beantragt };
   };
 
   const loadAbsence = (req) => {
@@ -691,6 +699,7 @@ function createApp(db, opts = {}) {
     return {
       absences: rows.map((a) => decorateAbsence(a, settings)),
       urlaub: isMgr ? null : urlaubKonto(req.user, year),
+      zusatzurlaub: isMgr || !req.user.schwerbehindert ? null : urlaubKonto(req.user, year, 'zusatzurlaub'),
       au_ab_tag: settings.au_ab_tag,
     };
   }));
@@ -702,29 +711,40 @@ function createApp(db, opts = {}) {
     const userId = isMgr && b.user_id ? Number(b.user_id) : req.user.id;
     const u = db.prepare('SELECT * FROM users WHERE id = ? AND active = 1').get(userId);
     if (!u) throw new HttpError(404, 'Mitarbeiter/in nicht gefunden.');
-    if (!['urlaub', 'krank'].includes(b.type)) throw new HttpError(400, 'Art muss Urlaub oder Krankheit sein.');
+    if (!ABS_TYPES.includes(b.type)) throw new HttpError(400, 'Unbekannte Art der Abwesenheit.');
+    if (b.type === 'zusatzurlaub' && !u.schwerbehindert) {
+      throw new HttpError(400, 'Zusatzurlaub nach § 208 SGB IX ist nur bei hinterlegter Schwerbehinderung möglich. Bitte wenden Sie sich an die Einsatzplanung.');
+    }
     if (!isoDate(b.from) || !isoDate(b.to) || b.from > b.to) throw new HttpError(400, 'Zeitraum ungültig.');
     if ((T.parseDate(b.to) - T.parseDate(b.from)) / T.DAY > 366) throw new HttpError(400, 'Zeitraum zu lang.');
     const today = T.isoDate(nowLocalMs());
     if (!isMgr) {
-      if (b.type === 'urlaub' && b.from < today) throw new HttpError(400, 'Urlaub kann nicht rückwirkend beantragt werden.');
+      if (b.type !== 'krank' && b.from < today) throw new HttpError(400, 'Urlaub kann nicht rückwirkend beantragt werden.');
       if (b.type === 'krank' && T.parseDate(today) - T.parseDate(b.from) > 14 * T.DAY) throw new HttpError(400, 'Krankmeldungen bitte innerhalb von 14 Tagen eintragen, sonst über die Einsatzplanung.');
     }
     const overlap = db.prepare(`SELECT * FROM absences WHERE user_id = ? AND status IN ('beantragt','genehmigt','gemeldet')
       AND from_date <= ? AND to_date >= ?`).get(userId, b.to, b.from);
-    if (overlap) throw new HttpError(409, `Im Zeitraum gibt es bereits einen Eintrag (${overlap.type === 'krank' ? 'Krankheit' : 'Urlaub'} ${overlap.from_date} – ${overlap.to_date}).`, 'UEBERSCHNEIDUNG');
-    if (b.type === 'urlaub') {
+    if (overlap) throw new HttpError(409, `Im Zeitraum gibt es bereits einen Eintrag (${ABS_LABEL[overlap.type]} ${overlap.from_date} – ${overlap.to_date}).`, 'UEBERSCHNEIDUNG');
+    const note = String(b.note || '').trim().slice(0, 500);
+    if (b.type !== 'krank') {
       const tage = T.arbeitstage(b.from, b.to);
       if (tage === 0) throw new HttpError(400, 'Im gewählten Zeitraum liegen keine Arbeitstage.');
+      if (b.type === 'sonderurlaub' && note.length < 3) throw new HttpError(400, 'Bitte den Anlass des Sonderurlaubs angeben (z. B. Umzug, Hochzeit).', 'BEGRUENDUNG');
+      if (!isMgr && (b.type === 'urlaub' || b.type === 'zusatzurlaub')) {
+        if (b.from.slice(0, 4) !== b.to.slice(0, 4)) throw new HttpError(400, 'Bitte Urlaub über den Jahreswechsel in zwei Anträgen stellen.');
+        const konto = urlaubKonto(u, Number(b.from.slice(0, 4)), b.type);
+        if (tage > konto.rest) {
+          throw new HttpError(400, `Nicht genügend ${ABS_LABEL[b.type]}: beantragt ${tage} Tage, verfügbar ${konto.rest} Tage.`, 'KONTINGENT');
+        }
+      }
     }
-    const note = String(b.note || '').trim().slice(0, 500);
     const status = b.type === 'krank' ? 'gemeldet' : (isMgr ? 'genehmigt' : 'beantragt');
     const id = db.prepare(`INSERT INTO absences (user_id, type, from_date, to_date, status, note, created_by, decided_by, decided_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(userId, b.type, b.from, b.to, status, note, req.user.id,
       status === 'genehmigt' ? req.user.id : null, status === 'genehmigt' ? new Date().toISOString() : null).lastInsertRowid;
     let removed = 0;
     if (status !== 'beantragt') {
-      removed = removeAssignmentsInRange(userId, b.from, b.to, req.user.id, b.type === 'krank' ? 'Krankmeldung' : 'Urlaub genehmigt');
+      removed = removeAssignmentsInRange(userId, b.from, b.to, req.user.id, b.type === 'krank' ? 'Krankmeldung' : `${ABS_LABEL[b.type]} genehmigt`);
     }
     audit(req.user.id, 'absence.create', { id, user_id: userId, type: b.type, from: b.from, to: b.to, status, note, removed });
     const a = db.prepare('SELECT a.*, u.name FROM absences a JOIN users u ON u.id = a.user_id WHERE a.id = ?').get(id);
@@ -735,14 +755,14 @@ function createApp(db, opts = {}) {
   app.put('/api/absences/:id/decision', auth, manager, wrap((req) => {
     const settings = getSettings();
     const a = loadAbsence(req);
-    if (a.type !== 'urlaub') throw new HttpError(400, 'Nur Urlaubsanträge werden genehmigt.');
+    if (a.type === 'krank') throw new HttpError(400, 'Krankmeldungen werden nicht genehmigt.');
     const status = req.body?.status;
     if (!['genehmigt', 'abgelehnt'].includes(status)) throw new HttpError(400, 'Status ungültig.');
     const note = String(req.body?.note || '').trim().slice(0, 500);
     if (status === 'abgelehnt' && note.length < 3) throw new HttpError(400, 'Bitte eine Begründung für die Ablehnung angeben.', 'BEGRUENDUNG');
     db.prepare('UPDATE absences SET status = ?, decision_note = ?, decided_by = ?, decided_at = ? WHERE id = ?')
       .run(status, note, req.user.id, new Date().toISOString(), a.id);
-    const removed = status === 'genehmigt' ? removeAssignmentsInRange(a.user_id, a.from_date, a.to_date, req.user.id, 'Urlaub genehmigt') : 0;
+    const removed = status === 'genehmigt' ? removeAssignmentsInRange(a.user_id, a.from_date, a.to_date, req.user.id, `${ABS_LABEL[a.type]} genehmigt`) : 0;
     audit(req.user.id, 'absence.decide', { id: a.id, user_id: a.user_id, status, note, removed });
     const fresh = db.prepare('SELECT a.*, u.name FROM absences a JOIN users u ON u.id = a.user_id WHERE a.id = ?').get(a.id);
     return { ...decorateAbsence(fresh, settings), removed };
@@ -773,7 +793,7 @@ function createApp(db, opts = {}) {
   app.delete('/api/absences/:id', auth, wrap((req) => {
     const a = loadAbsence(req);
     const isMgr = req.user.role === 'manager';
-    if (!isMgr && !(a.type === 'urlaub' && a.status === 'beantragt')) {
+    if (!isMgr && !(a.type !== 'krank' && a.status === 'beantragt')) {
       throw new HttpError(403, 'Nur noch nicht entschiedene Urlaubsanträge können zurückgezogen werden. Bitte wenden Sie sich an die Einsatzplanung.');
     }
     for (const f of db.prepare('SELECT stored_name FROM attachments WHERE absence_id = ?').all(a.id)) {
@@ -865,22 +885,25 @@ function createApp(db, opts = {}) {
       // Urlaub (genehmigt) und Krankheit: je Arbeitstag 1/5 der Wochenarbeitszeit (§ 6 Abs. 3, § 21 TVöD, vereinfacht)
       const abs = db.prepare(`SELECT * FROM absences WHERE user_id = ? AND status IN ('genehmigt','gemeldet')
         AND from_date <= ? AND to_date >= ?`).all(u.id, to, from);
-      let urlaubTage = 0, krankTage = 0, auFehlt = 0;
+      let urlaubTage = 0, sonderTage = 0, krankTage = 0, auFehlt = 0;
       for (const a of abs) {
         const tage = T.arbeitstage(a.from_date < from ? from : a.from_date, a.to_date > to ? to : a.to_date);
-        if (a.type === 'urlaub') urlaubTage += tage; else krankTage += tage;
+        if (a.type === 'krank') krankTage += tage;
+        else if (a.type === 'sonderurlaub') sonderTage += tage;
+        else urlaubTage += tage; // Erholungs- und Zusatzurlaub
         if (auRequired(a, settings) && !db.prepare('SELECT 1 FROM attachments WHERE absence_id = ?').get(a.id)) auFehlt++;
       }
       const perDay = (Number(u.weekly_hours) || 0) / 5;
       const urlaubStd = urlaubTage * perDay;
       const krankStd = krankTage * perDay;
-      const ist = sum.stunden + urlaubStd + krankStd;
+      const sonderStd = sonderTage * perDay;
+      const ist = sum.stunden + urlaubStd + krankStd + sonderStd;
       const soll = T.sollStunden(y, m, u.weekly_hours);
       return {
         user_id: u.id, name: u.name, qualification: u.qualification, weekly_hours: u.weekly_hours,
         min_hours_month: u.min_hours_month, dienste: shifts.length, nachtschichten,
         gearbeitet: r2(sum.stunden), urlaub_tage: urlaubTage, urlaub_std: r2(urlaubStd), krank_tage: krankTage, krank_std: r2(krankStd),
-        au_fehlt: auFehlt, soll: r2(soll), ist: r2(ist), saldo: r2(ist - soll),
+        sonder_tage: sonderTage, sonder_std: r2(sonderStd), au_fehlt: auFehlt, soll: r2(soll), ist: r2(ist), saldo: r2(ist - soll),
         nacht: r2(sum.nacht), samstag: r2(sum.samstag), sonntag: r2(sum.sonntag), feiertag: r2(sum.feiertag), vorfest: r2(sum.vorfest),
         zuschlag_eur: r2(euro), min_erfuellt: ist + 1e-9 >= (u.min_hours_month || 0),
       };
@@ -903,10 +926,10 @@ function createApp(db, opts = {}) {
     const r = report(req.query.month, null);
     const num = (x) => String(x).replace('.', ',');
     const head = ['Name', 'Qualifikation', 'Wochenstd.', 'Soll', 'Gearbeitet', 'Urlaubstage', 'Urlaub Std.', 'Krankheitstage', 'Krank Std.',
-      'Ist gesamt', 'Saldo', 'Mindeststd.', 'Mindeststd. erfüllt', 'Dienste', 'Nachtschichten', 'Nacht-Std.', 'Samstag-Std.',
+      'Sonderurlaub Tage', 'Sonderurlaub Std.', 'Ist gesamt', 'Saldo', 'Mindeststd.', 'Mindeststd. erfüllt', 'Dienste', 'Nachtschichten', 'Nacht-Std.', 'Samstag-Std.',
       'Sonntag-Std.', 'Feiertag-Std.', 'Vorfest-Std.', 'Zuschläge EUR', 'AU fehlt'];
     const lines = [head, ...r.rows.map((x) => [x.name, x.qualification, num(x.weekly_hours), num(x.soll), num(x.gearbeitet),
-      x.urlaub_tage, num(x.urlaub_std), x.krank_tage, num(x.krank_std), num(x.ist), num(x.saldo),
+      x.urlaub_tage, num(x.urlaub_std), x.krank_tage, num(x.krank_std), x.sonder_tage, num(x.sonder_std), num(x.ist), num(x.saldo),
       num(x.min_hours_month), x.min_erfuellt ? 'ja' : 'nein', x.dienste, x.nachtschichten, num(x.nacht), num(x.samstag),
       num(x.sonntag), num(x.feiertag), num(x.vorfest), num(x.zuschlag_eur), x.au_fehlt])];
     const csv = '﻿' + lines.map((l) => l.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n');
