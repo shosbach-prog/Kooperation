@@ -12,6 +12,7 @@ async function renderPlan() {
   const days = [...Array(7)].map((_, i) => addDays(from, i));
   const byKey = new Map(plan.shifts.map((s) => [`${s.date}|${s.unit_id}|${s.shift_type_id}`, s]));
   state.planAbsences = plan.absences || [];
+  state.planWishes = plan.wishes || [];
   const staffUsers = users.filter((u) => u.active && u.role === 'staff');
   const f = String(state.unitFilter || '');
   const activeUnits = units.filter((u) => u.active && (!f
@@ -44,6 +45,11 @@ async function renderPlan() {
     return h('th', { class: `day${wd === 0 || wd === 6 ? ' weekend' : ''}${hol ? ' holiday' : ''}${d === today ? ' today' : ''}`, title: hol || '' },
       `${WD[wd]} ${fmtDate(d).slice(0, 6)}`, hol ? h('div', { class: 'small' }, hol) : null,
       isMgr() && abs.length ? h('div', { class: 'small absent-info', title: abs.map((a) => `${a.name}: ${absLabel(a)}`).join('\n') }, `${abs.length} abwesend`) : null,
+      isMgr() && (state.planWishes || []).some((w) => w.date === d) ? (() => {
+        const ws = state.planWishes.filter((w) => w.date === d);
+        return h('div', { class: 'small wish-info', title: ws.map((w) => `${w.name}: ${w.art === 'frei' ? 'möchte frei' : `Wunsch ${w.type_name}`}${w.note ? ` (${w.note})` : ''}`).join('\n') },
+          `★ ${ws.length} Wunsch${ws.length > 1 ? 'e' : ''}`);
+      })() : null,
       !isMgr() && mineAbs ? h('div', { class: 'small absent-info' }, absLabel(mineAbs)) : null);
   }));
 
@@ -206,7 +212,9 @@ function renderCell(s, staffUsers, compact = false) {
       action = h('select', { onchange: (e) => { if (e.target.value) assign(s, Number(e.target.value)); } },
         h('option', { value: '' }, compact ? '+ Person' : '+ Person eintragen'), free.map((u) => {
           const ab = absentIds.get(u.id);
-          return h('option', { value: u.id, disabled: !!ab }, `${u.name}${u.qualification ? ' – ' + u.qualification : ''}${ab ? ` (${absLabel(ab)})` : ''}`);
+          const w = wishOf(u.id, s.date);
+          const wtxt = w ? (w.art === 'frei' ? ' · möchte frei' : w.shift_type_id === s.shift_type_id ? ' · ★ Wunschdienst' : ` · wünscht ${w.type_code}`) : '';
+          return h('option', { value: u.id, disabled: !!ab }, `${u.name}${u.qualification ? ' – ' + u.qualification : ''}${ab ? ` (${absLabel(ab)})` : ''}${wtxt}`);
         }));
     }
   } else if (mine) {

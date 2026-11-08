@@ -941,7 +941,9 @@ function createApp(db, opts = {}) {
     const absences = db.prepare(`SELECT a.id, a.user_id, a.type, a.from_date, a.to_date, a.status, u.name FROM absences a
       JOIN users u ON u.id = a.user_id WHERE a.status IN ('beantragt','genehmigt','gemeldet') AND a.from_date <= ? AND a.to_date >= ?
       ${isMgr ? '' : 'AND a.user_id = ?'}`).all(...(isMgr ? [to, from] : [to, from, req.user.id]));
-    return { shifts: loadShifts('s.date BETWEEN ? AND ?', [from, to]), holidays, absences };
+    // Dienstwünsche: Verwaltung sieht alle, Mitarbeitende nur die eigenen
+    const wishes = ctx.wishesBetween ? ctx.wishesBetween(from, to).filter((w) => isMgr || w.user_id === req.user.id) : [];
+    return { shifts: loadShifts('s.date BETWEEN ? AND ?', [from, to]), holidays, absences, wishes };
   }));
 
   app.get('/api/my-shifts', auth, wrap((req) => {

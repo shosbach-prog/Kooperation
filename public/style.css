@@ -332,6 +332,24 @@ details.edit > summary::-webkit-details-marker { display: none; }
 details.edit > summary::before { content: "✎ "; }
 details.edit[open] > summary { margin-bottom: .5rem; }
 
+/* ---------- Wünsche ---------- */
+.wish-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: .3rem; }
+.wish-head { text-align: center; font-size: .75rem; font-weight: 700; color: var(--muted); padding: .2rem 0; }
+.wish-day { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: .1rem; min-height: 64px; padding: .3rem .1rem;
+  background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-sm); font-weight: 500; }
+.wish-day.empty { border: 0; background: transparent; }
+.wish-day.weekend { background: color-mix(in srgb, var(--primary) 6%, var(--bg)); }
+.wish-day.locked { opacity: .45; }
+.wish-day .wd-num { font-weight: 700; }
+.wish-day .wish-tag { font-size: .72rem; font-weight: 700; border-radius: 999px; padding: 0 .45rem; }
+.wish-day.wish-frei { border-color: var(--ok); background: var(--ok-bg); }
+.wish-day.wish-frei .wish-tag { color: var(--ok); }
+.wish-day.wish-dienst { border-color: var(--primary); }
+.wish-day.wish-dienst .wish-tag { color: var(--primary-ink); background: var(--primary); }
+.wish-day .wish-abs { font-size: .65rem; color: var(--warn); line-height: 1.1; text-align: center; }
+.legend .l-wish::before { background: var(--primary); }
+.wish-info { color: var(--primary); font-weight: 600; text-transform: none; letter-spacing: 0; }
+
 /* ---------- Sonstiges ---------- */
 .check-list { display: grid; gap: .45rem; max-height: 40vh; overflow-y: auto; }
 .save-bar { position: sticky; bottom: calc(var(--bottomnav) + .5rem + env(safe-area-inset-bottom)); z-index: 5; display: flex; justify-content: flex-end; padding: .6rem .9rem; }

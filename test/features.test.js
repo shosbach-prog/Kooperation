@@ -279,3 +279,41 @@ test('Verwaltungsrechte nur für bestimmte Stationen', async () => {
   assert.equal((await murat('PUT', `/api/shifts/${f2.id}`, { min_staff: 1 })).status, 200);
   await mgr('PUT', `/api/users/${users.myilmaz}`, { admin_rechte: 'keine' });
 });
+
+test('Dienstwünsche: Frist, Höchstzahl, Wunschdienst, Sichtbarkeit', async () => {
+  const kevin = await as('kschulz');
+  const tobias = await as('twagner');
+  await mgr('PUT', '/api/settings', { wunsch_frist_tage: 14, wunsch_frei_max_monat: 2 });
+  // zu kurzfristig
+  assert.equal((await kevin('PUT', '/api/wishes', { date: day(3), art: 'frei' })).data.code, 'FRIST');
+  // Monat mit mindestens 3 freien Tagen nach der Frist
+  const base = new Date(Date.now() + 40 * 86400000);
+  const month = `${base.getUTCFullYear()}-${String(base.getUTCMonth() + 1).padStart(2, '0')}`;
+  const d = (n) => `${month}-${String(n).padStart(2, '0')}`;
+  assert.equal((await kevin('PUT', '/api/wishes', { date: d(10), art: 'frei', note: 'Geburtstag' })).status, 200);
+  assert.equal((await kevin('PUT', '/api/wishes', { date: d(11), art: 'frei' })).status, 200);
+  assert.equal((await kevin('PUT', '/api/wishes', { date: d(12), art: 'frei' })).data.code, 'LIMIT');
+  // bestehenden Wunsch ändern zählt nicht doppelt
+  assert.equal((await kevin('PUT', '/api/wishes', { date: d(11), art: 'frei', note: 'geändert' })).status, 200);
+  // Wunschdienst (Frühdienst)
+  const types = (await kevin('GET', '/api/shift-types')).data;
+  const fId = types.find((t) => t.code === 'F').id;
+  let r = await kevin('PUT', '/api/wishes', { date: d(13), art: 'dienst', shift_type_id: fId });
+  assert.equal(r.data.type_code, 'F');
+  assert.equal((await kevin('PUT', '/api/wishes', { date: d(14), art: 'dienst' })).status, 400);
+  // Sichtbarkeit
+  await tobias('PUT', '/api/wishes', { date: d(10), art: 'frei' });
+  const own = (await kevin('GET', `/api/wishes?from=${d(1)}&to=${d(28)}`)).data.wuensche;
+  assert.ok(own.every((w) => w.user_id === users.kschulz));
+  assert.equal(own.length, 3);
+  const all = (await mgr('GET', `/api/wishes?from=${d(1)}&to=${d(28)}`)).data.wuensche;
+  assert.ok(all.some((w) => w.user_id === users.twagner));
+  // im Dienstplan: Verwaltung sieht alle Wünsche, Mitarbeitende nur eigene
+  assert.ok((await mgr('GET', `/api/plan?from=${d(10)}&to=${d(10)}`)).data.wishes.length >= 2);
+  assert.ok((await kevin('GET', `/api/plan?from=${d(10)}&to=${d(10)}`)).data.wishes.every((w) => w.user_id === users.kschulz));
+  // löschen
+  await kevin('DELETE', `/api/wishes/${d(13)}`);
+  assert.equal((await kevin('GET', `/api/wishes?from=${d(1)}&to=${d(28)}`)).data.wuensche.length, 2);
+  // Verwaltung darf trotz Frist/Limit für Personen ihres Bereichs eintragen
+  assert.equal((await mgr('PUT', '/api/wishes', { user_id: users.kschulz, date: day(2), art: 'frei' })).status, 200);
+});

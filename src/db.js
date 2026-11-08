@@ -27,6 +27,8 @@ const DEFAULT_SETTINGS = {
   urlaubstage_standard: 30,
   au_ab_tag: 4,
   tausch_bestaetigung: false,
+  wunsch_frist_tage: 14,
+  wunsch_frei_max_monat: 4,
 };
 
 function hashPassword(pw) {
@@ -215,6 +217,17 @@ CREATE TABLE IF NOT EXISTS secrets (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
 -- einmalige Erinnerungen (verhindert doppelte Benachrichtigungen)
 CREATE TABLE IF NOT EXISTS reminders_sent (key TEXT PRIMARY KEY, at TEXT NOT NULL DEFAULT (datetime('now')));
+
+CREATE TABLE IF NOT EXISTS wishes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  date TEXT NOT NULL,
+  art TEXT NOT NULL CHECK (art IN ('frei','dienst')),
+  shift_type_id INTEGER REFERENCES shift_types(id) ON DELETE SET NULL,
+  note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (user_id, date)
+);
 
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
