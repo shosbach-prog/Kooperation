@@ -81,6 +81,11 @@ Zuschlagsstunden abgezogen.
 > gültigen Tarifstand bzw. den Regelungen im Haus abgeglichen werden.
 > Der Prototyp ersetzt keine Entgeltabrechnung.
 
+## Ausprobieren
+
+Ohne eigenen Server, entweder im Browser über GitHub Codespaces oder per Doppelklick auf dem eigenen PC:
+siehe **[TESTEN.md](TESTEN.md)** mit Test-Drehbuch.
+
 ## Starten
 
 Voraussetzung: **Node.js ≥ 22.13**. Die Datenbank (SQLite) ist bereits in Node.js enthalten.

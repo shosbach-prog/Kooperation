@@ -1,0 +1,14 @@
+{
+  "name": "Personaleinsatzplanung (Test)",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "postCreateCommand": "npm install",
+  "postAttachCommand": "npm start",
+  "forwardPorts": [3000],
+  "portsAttributes": {
+    "3000": { "label": "Dienstplan", "onAutoForward": "openBrowser" }
+  },
+  "containerEnv": { "SEED_DEMO": "1" },
+  "customizations": {
+    "codespaces": { "openFiles": ["TESTEN.md"] }
+  }
+}
