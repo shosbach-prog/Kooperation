@@ -138,7 +138,7 @@ cd deploy && cp .env.beispiel .env   # DOMAIN und MANAGER_PASSWORD eintragen
 docker compose up -d --build
 ```
 
-Datensicherung: `npm run backup` bzw. im Container `docker compose exec app node scripts/backup.js`.
+Datensicherung: `npm run backup` bzw. auf dem Server `deploy/backup-cron.sh` – mit `BACKUP_PASSWORT` verschlüsselt (AES-256-GCM), Wiederherstellung mit `scripts/restore.js`, Überwachung über `/api/health`. Details: [deploy/UEBERWACHUNG.md](deploy/UEBERWACHUNG.md).
 
 ### Betrieb im Kliniknetz und Zugriff vom privaten Handy
 

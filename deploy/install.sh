@@ -125,6 +125,13 @@ EOF
   chmod 600 "$DEPLOY_DIR/.env"
   umask 022
 fi
+# Sicherungs-Passwort (verschlüsselte Sicherungen) – wird einmalig erzeugt, falls noch nicht vorhanden
+NEW_BACKUP_PW=""
+if ! grep -q '^BACKUP_PASSWORT=' "$DEPLOY_DIR/.env"; then
+  NEW_BACKUP_PW="$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 28)"
+  printf '\n# Passwort für die verschlüsselten Sicherungen – zusätzlich sicher aufbewahren (z. B. Passwort-Safe)!\nBACKUP_PASSWORT=%s\n# Optional: Sicherungen per rsync/SSH auf einen zweiten Rechner kopieren, z. B. benutzer@nas:/sicherungen\nBACKUP_KOPIE_ZIEL=\n' "$NEW_BACKUP_PW" >> "$DEPLOY_DIR/.env"
+  chmod 600 "$DEPLOY_DIR/.env"
+fi
 DOMAIN="$(grep '^DOMAIN=' "$DEPLOY_DIR/.env" | cut -d= -f2-)"
 BASE_PATH="$(grep '^BASE_PATH=' "$DEPLOY_DIR/.env" | cut -d= -f2- || true)"
 URL="https://$DOMAIN$BASE_PATH/"
@@ -147,9 +154,11 @@ cd "$DEPLOY_DIR"
 docker compose up -d --build
 
 # --- Tägliche Sicherung -----------------------------------------------------
+command -v rsync >/dev/null || apt-get install -y -qq rsync >/dev/null 2>&1 || true
+chmod +x "$DEPLOY_DIR/backup-cron.sh"
 cat > /etc/cron.d/dienstplan-backup <<EOF
-# Tägliche Datensicherung der Personaleinsatzplanung (14 Tage aufbewahrt)
-0 3 * * * root cd $DEPLOY_DIR && docker compose exec -T -u node app node scripts/backup.js >> /var/log/dienstplan-backup.log 2>&1
+# Tägliche verschlüsselte Datensicherung der Personaleinsatzplanung (14 Tage aufbewahrt)
+0 3 * * * root $DEPLOY_DIR/backup-cron.sh >> /var/log/dienstplan-backup.log 2>&1
 EOF
 chmod 644 /etc/cron.d/dienstplan-backup
 
@@ -179,5 +188,13 @@ Nächste Schritte:
 Nützliche Befehle (auf dem Server):
   Update einspielen:   bash $DEPLOY_DIR/install.sh   (Konfiguration behalten)
   Protokoll ansehen:   cd $DEPLOY_DIR && docker compose logs -f app
-  Sicherungen:         $DEPLOY_DIR/data/backups/
+  Sicherungen:         $DEPLOY_DIR/data/backups/   (verschlüsselt, *.pep)
+  Sicherung sofort:    $DEPLOY_DIR/backup-cron.sh
+  Überwachung:         ${URL}api/health?backup=1   (siehe deploy/UEBERWACHUNG.md)
 EOF
+if [ -n "$NEW_BACKUP_PW" ]; then
+  echo
+  gelb "WICHTIG – Passwort für die verschlüsselten Sicherungen (bitte jetzt notieren, z. B. im Passwort-Safe):"
+  printf '\n    \033[1m%s\033[0m\n\n' "$NEW_BACKUP_PW"
+  gelb "Ohne dieses Passwort lassen sich Sicherungen NICHT wiederherstellen. Es steht auch in $DEPLOY_DIR/.env."
+fi

@@ -190,7 +190,8 @@ test('Zwei-Faktor-Anmeldung: Pflicht, falscher Code, Sperre, Zurücksetzen', asy
   assert.match(s.data.qr, /^data:image\/png;base64,/);
   const secret = new URL(s.data.uri.replace('otpauth://', 'http://')).searchParams.get('secret');
   assert.equal((await kevin('POST', '/api/2fa/enable', { code: '000000' === TOTP.totp(secret) ? '111111' : '000000' })).status, 400);
-  r = await kevin('POST', '/api/2fa/enable', { code: TOTP.totp(secret) });
+  const usedCode = TOTP.totp(secret);
+  r = await kevin('POST', '/api/2fa/enable', { code: usedCode });
   assert.equal(r.status, 200);
   assert.equal(r.data.recovery_codes.length, 10);
   const codes = r.data.recovery_codes;
@@ -201,8 +202,8 @@ test('Zwei-Faktor-Anmeldung: Pflicht, falscher Code, Sperre, Zurücksetzen', asy
   r = await k2('POST', '/api/login', { username: 'kschulz', password: 'demo123' });
   assert.equal(r.data.stage, '2fa');
   assert.equal((await k2('GET', '/api/my-shifts')).data.code, 'STAGE_2FA');
-  // Wiederverwendung desselben Codes wird abgelehnt
-  r = await k2('POST', '/api/login/2fa', { code: TOTP.totp(secret) });
+  // Wiederverwendung desselben Codes wird abgelehnt (genau derselbe Code, auch wenn inzwischen ein neues 30-s-Fenster begonnen hat)
+  r = await k2('POST', '/api/login/2fa', { code: usedCode });
   assert.equal(r.status, 401);
   // Wiederherstellungscode funktioniert genau einmal
   r = await k2('POST', '/api/login/2fa', { code: codes[0] });
