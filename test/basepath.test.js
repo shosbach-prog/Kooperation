@@ -26,7 +26,7 @@ test('Betrieb im Unterordner (BASE_PATH=/LWL)', async () => {
     r = await fetch(`${base}/LWL/`);
     assert.equal(r.status, 200);
     assert.match(await r.text(), /<title>/);
-    assert.equal((await fetch(`${base}/LWL/app.js`)).status, 200);
+    assert.equal((await fetch(`${base}/LWL/js/core.js`)).status, 200);
     assert.equal((await fetch(`${base}/LWL/api/me`)).status, 401);
     r = await fetch(`${base}/LWL/api/login`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'manager', password: 'manager123' }),
