@@ -39,7 +39,8 @@ Arbeitszeit wird angelehnt an den **TVöD (BT-K)** angerechnet.
 
 **Profilfoto**
 - Jede Person kann unter **„Mein Profil“** freiwillig ein Foto hochladen, auf dem Handy direkt mit der Kamera; die Verwaltung kann es in der Personalakte setzen oder entfernen
-- Das Foto wird im Browser quadratisch zugeschnitten und auf 512 px verkleinert; Metadaten wie der Aufnahmeort werden dabei entfernt
+- **Zuschnitt:** Nach der Auswahl das Bild verschieben (Finger/Maus) und vergrößern (zwei Finger, Mausrad, Regler oder +/−), bis nur der Kopf im Kreis ist; ein ovaler Rahmen hilft beim Ausrichten. Der Ausschnitt lässt sich später über „Ausschnitt ändern“ anpassen
+- Gespeichert wird nur der Ausschnitt (max. 512 px, JPEG); Metadaten wie der Aufnahmeort werden dabei entfernt
 - Sichtbar nur für angemeldete Kolleginnen und Kollegen (Dienstplan, Personalliste, Personalakte)
 
 **Auf dem privaten Handy**

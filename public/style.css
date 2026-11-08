@@ -332,6 +332,20 @@ dialog.ui-dialog::backdrop { background: rgba(10, 15, 20, .5); }
 .ui-dialog-fields { display: grid; gap: .7rem; }
 .ui-dialog-actions { display: flex; justify-content: flex-end; gap: .5rem; flex-wrap: wrap; margin-top: .4rem; }
 
+/* ---------- Bildzuschnitt ---------- */
+.crop-dialog { justify-items: center; }
+.crop-dialog > h2, .crop-dialog > .ui-dialog-msg, .crop-dialog > .ui-dialog-actions { justify-self: stretch; }
+.crop-stage { position: relative; overflow: hidden; border-radius: 12px; background: #000; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
+.crop-stage:active { cursor: grabbing; }
+.crop-stage canvas { display: block; }
+/* abgedunkelter Bereich außerhalb des Kreises */
+.crop-mask { position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 999px rgba(0, 0, 0, .55); outline: 2px solid rgba(255, 255, 255, .9); pointer-events: none; }
+/* Orientierung: Kopf (Oval) und Augenlinie */
+.crop-guide { position: absolute; left: 31%; right: 31%; top: 14%; bottom: 24%; border: 2px dashed rgba(255, 255, 255, .45); border-radius: 50% 50% 46% 46%; pointer-events: none; }
+.crop-controls { display: flex; align-items: center; gap: .5rem; width: 100%; max-width: 340px; }
+.crop-controls button { min-width: 44px; font-size: 1.25rem; padding: 0; }
+.crop-zoom { flex: 1; min-height: 0; padding: 0; border: 0; background: transparent; accent-color: var(--primary); }
+
 /* ---------- Meldung ---------- */
 #toast { position: fixed; bottom: 1.25rem; left: 50%; transform: translateX(-50%) translateY(8px); background: var(--text); color: var(--bg); padding: .65rem 1rem; border-radius: var(--radius); opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; max-width: min(92vw, 520px); z-index: 100; box-shadow: var(--shadow-lg); text-align: center; }
 #toast.show { opacity: 1; transform: translateX(-50%); }
