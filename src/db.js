@@ -26,6 +26,7 @@ const DEFAULT_SETTINGS = {
   begruendung_austragen: true,
   urlaubstage_standard: 30,
   au_ab_tag: 4,
+  tausch_bestaetigung: false,
 };
 
 function hashPassword(pw) {
@@ -172,6 +173,20 @@ CREATE TABLE IF NOT EXISTS attachments (
   size INTEGER NOT NULL,
   uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
   uploaded_by INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS swap_offers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shift_id INTEGER NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'offen',
+  note TEXT NOT NULL DEFAULT '',
+  taker_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  taken_at TEXT,
+  decided_by INTEGER,
+  decided_at TEXT,
+  decision_note TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (

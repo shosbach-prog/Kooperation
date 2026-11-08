@@ -847,9 +847,16 @@ function createApp(db, opts = {}) {
     const byShift = assignedFor(shifts.map((s) => s.id));
     const rules = loadRules();
     const groups = new Map();
+    const offers = new Map();
+    for (const o of db.prepare(`SELECT id, shift_id, user_id, status FROM swap_offers WHERE status IN ('offen','angenommen')
+      AND shift_id IN (${shifts.map(() => '?').join(',')})`).all(...shifts.map((x) => x.id))) {
+      if (!offers.has(o.shift_id)) offers.set(o.shift_id, []);
+      offers.get(o.shift_id).push({ id: o.id, user_id: o.user_id, status: o.status });
+    }
     return shifts.map((s) => {
       const list = byShift.get(s.id);
-      const out = { ...s, hours: T.shiftHours(s), holiday: T.holidayName(s.date), assigned: list, qual_missing: qualMissing(s, list, rules), verbund: null };
+      const out = { ...s, hours: T.shiftHours(s), holiday: T.holidayName(s.date), assigned: list, qual_missing: qualMissing(s, list, rules), verbund: null,
+        angebote: offers.get(s.id) || [] };
       if (s.verbund_id) {
         const key = `${s.date}|${s.shift_type_id}|${s.verbund_id}`;
         if (!groups.has(key)) groups.set(key, verbundGroup(s.date, s.shift_type_id, s.verbund_id, rules));
@@ -1056,7 +1063,7 @@ function createApp(db, opts = {}) {
   /** Protokoll der Ein- und Austragungen mit Begründung */
   app.get('/api/log', auth, manager, wrap((req) => {
     const limit = Math.min(Number(req.query.limit) || 200, 1000);
-    const rows = db.prepare(`SELECT * FROM audit_log WHERE action IN ('assignment.add','assignment.remove','assignment.move','absence.create','absence.decide',
+    const rows = db.prepare(`SELECT * FROM audit_log WHERE action IN ('assignment.add','assignment.remove','assignment.move','swap.offer','swap.take','swap.done','swap.decide','swap.withdraw','absence.create','absence.decide',
       'absence.update','absence.delete','attachment.upload','user.rights','user.create','unit.create','unit.update','unit.delete','building.create','building.update','building.delete','verbund.create','verbund.update','verbund.delete') ORDER BY id DESC LIMIT ?`).all(limit);
     const userName = new Map(db.prepare('SELECT id, name FROM users').all().map((u) => [u.id, u.name]));
     const shiftInfo = db.prepare(`SELECT s.date, st.code, u.name AS unit_name FROM shifts s JOIN shift_types st ON st.id = s.shift_type_id

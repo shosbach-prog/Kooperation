@@ -249,6 +249,7 @@ main { padding: 1.1rem; max-width: 1500px; margin: 0 auto; }
 .cell.full { background: var(--full-bg); border-left-color: var(--muted); }
 .cell.covered { background: var(--warn-bg); border-left-color: var(--warn); border-left-style: dashed; }
 .cell .verbund-info { font-size: .75rem; color: var(--muted); }
+.swap-mark { color: var(--warn); font-weight: 700; margin-left: .2rem; }
 .cell .verbund-info.ok { color: var(--ok); }
 .cell li .li-actions { display: inline-flex; gap: .2rem; flex: 0 0 auto; }
 .cell .person-btn { display: inline-flex; align-items: center; gap: .3rem; background: transparent; border: 0; color: inherit; font: inherit; font-weight: inherit;

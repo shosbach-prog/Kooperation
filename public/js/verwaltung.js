@@ -133,6 +133,7 @@ async function renderSettings() {
     ['austrag_unter_minimum', 'Austragen auch unter Mindestbesetzung erlauben', 'checkbox'],
     ['begruendung_austragen', 'Begründung beim Austragen verlangen', 'checkbox'],
     ['begruendung_eintragen', 'Begründung beim Eintragen verlangen', 'checkbox'],
+    ['tausch_bestaetigung', 'Diensttausch muss von der Verwaltung bestätigt werden', 'checkbox', 'Ohne Haken ist eine Übernahme aus der Tauschbörse sofort wirksam.'],
     ['urlaubstage_standard', 'Urlaubstage pro Jahr (Standard für neue Mitarbeitende)', 'number', 'TVöD § 26: 30 Arbeitstage bei 5-Tage-Woche'],
     ['au_ab_tag', 'AU-Bescheinigung erforderlich ab Krankheitstag', 'number', 'EFZG § 5: ab dem 4. Kalendertag; 1 = ab dem ersten Tag'],
     ['qualifikationen', 'Qualifikationen (eine pro Zeile)', 'list'],

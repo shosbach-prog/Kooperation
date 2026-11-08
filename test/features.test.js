@@ -84,3 +84,80 @@ test('Kalender-Abo (iCal)', async () => {
   assert.equal((await fetch(`${base}/api/ical/${token}.ics`)).status, 404);
   assert.equal((await fetch(`${base}/api/ical/${renewed}.ics`)).status, 200);
 });
+
+test('Tauschbörse: anbieten, übernehmen, bestätigen, Regeln', async () => {
+  const anna = await as('abecker');     // Pflegefachkraft
+  const murat = await as('myilmaz');    // Pflegefachkraft
+  const kevin = await as('kschulz');    // Pflegehilfskraft
+  // Verbund aus den Demo-Daten auflösen, damit nur die Station zählt
+  for (const v of (await mgr('GET', '/api/verbuende')).data) await mgr('DELETE', `/api/verbuende/${v.id}`);
+  const f = await shiftOn(day(15), 'F');
+  await mgr('POST', `/api/shifts/${f.id}/assign`, { user_id: users.abecker });
+
+  // nur eigene Dienste anbieten
+  assert.equal((await murat('POST', '/api/swaps', { shift_id: f.id })).status, 400);
+  let r = await anna('POST', '/api/swaps', { shift_id: f.id, note: 'Familienfeier' });
+  assert.equal(r.status, 200);
+  const offerId = r.data.id;
+  assert.equal((await anna('POST', '/api/swaps', { shift_id: f.id })).status, 409); // doppelt
+  // im Plan markiert
+  const p = (await murat('GET', `/api/plan?from=${day(15)}&to=${day(15)}`)).data.shifts.find((s) => s.id === f.id);
+  assert.equal(p.angebote[0].user_id, users.abecker);
+  // Kolleg/innen sehen das Angebot
+  assert.ok((await kevin('GET', '/api/swaps')).data.angebote.some((o) => o.id === offerId));
+  // eigenes Angebot nicht übernehmbar
+  assert.equal((await anna('POST', `/api/swaps/${offerId}/take`)).status, 400);
+  // Pflegehilfskraft darf die einzige Pflegefachkraft nicht ersetzen (Qualifikationsregel)
+  r = await kevin('POST', `/api/swaps/${offerId}/take`);
+  assert.equal(r.data.code, 'QUALIFIKATION');
+  // Murat übernimmt sofort (ohne Bestätigungspflicht)
+  r = await murat('POST', `/api/swaps/${offerId}/take`);
+  assert.equal(r.status, 200);
+  assert.equal(r.data.wartet, false);
+  assert.equal(r.data.status, 'erledigt');
+  const after = (await mgr('GET', `/api/plan?from=${day(15)}&to=${day(15)}`)).data.shifts.find((s) => s.id === f.id);
+  assert.deepEqual(after.assigned.map((a) => a.user_id), [users.myilmaz]);
+  assert.equal((await murat('POST', `/api/swaps/${offerId}/take`)).status, 404); // nicht mehr verfügbar
+
+  // Ruhezeit: Julia hat den Spätdienst am Vortag → Frühdienst nur 8 h später nicht übernehmbar
+  const julia = await as('jschmitz');
+  const spaet = await shiftOn(day(14), 'S');
+  assert.equal((await mgr('POST', `/api/shifts/${spaet.id}/assign`, { user_id: users.jschmitz })).status, 200);
+  const f2 = await shiftOn(day(15), 'F', 'Station 2');
+  await mgr('POST', `/api/shifts/${f2.id}/assign`, { user_id: users.twagner });
+  const tobias = await as('twagner');
+  const o2 = (await tobias('POST', '/api/swaps', { shift_id: f2.id })).data;
+  r = await julia('POST', `/api/swaps/${o2.id}/take`);
+  assert.equal(r.data.code, 'RUHEZEIT');
+  // Murat hat an dem Tag schon den Frühdienst auf Station 1 → Überschneidung
+  assert.equal((await murat('POST', `/api/swaps/${o2.id}/take`)).data.code, 'UEBERSCHNEIDUNG'); // Spätdienst bis 22:00, Frühdienst ab 06:00 = 8 Std.
+
+  // Mit Bestätigungspflicht: Anfrage → Verwaltung bestätigt bzw. lehnt ab
+  await mgr('PUT', '/api/settings', { tausch_bestaetigung: true });
+  r = await anna('POST', `/api/swaps/${o2.id}/take`);
+  assert.equal(r.data.wartet, true);
+  assert.equal(r.data.status, 'angenommen');
+  // noch nicht getauscht
+  let plan2 = (await mgr('GET', `/api/plan?from=${day(15)}&to=${day(15)}`)).data.shifts.find((s) => s.id === f2.id);
+  assert.deepEqual(plan2.assigned.map((a) => a.user_id), [users.twagner]);
+  // Mitarbeitende dürfen nicht entscheiden; Ablehnen braucht keine Pflicht-Begründung, setzt aber zurück auf offen
+  assert.equal((await anna('POST', `/api/swaps/${o2.id}/decide`, { status: 'bestaetigt' })).status, 403);
+  r = await mgr('POST', `/api/swaps/${o2.id}/decide`, { status: 'abgelehnt', note: 'Bitte vorher absprechen' });
+  assert.equal(r.data.status, 'offen');
+  await anna('POST', `/api/swaps/${o2.id}/take`);
+  r = await mgr('POST', `/api/swaps/${o2.id}/decide`, { status: 'bestaetigt' });
+  assert.equal(r.data.status, 'erledigt');
+  plan2 = (await mgr('GET', `/api/plan?from=${day(15)}&to=${day(15)}`)).data.shifts.find((s) => s.id === f2.id);
+  assert.deepEqual(plan2.assigned.map((a) => a.user_id), [users.abecker]);
+  await mgr('PUT', '/api/settings', { tausch_bestaetigung: false });
+
+  // Zurückziehen
+  const f3 = await shiftOn(day(16), 'F');
+  await mgr('POST', `/api/shifts/${f3.id}/assign`, { user_id: users.abecker });
+  const o3 = (await anna('POST', '/api/swaps', { shift_id: f3.id })).data;
+  assert.equal((await murat('DELETE', `/api/swaps/${o3.id}`)).status, 403);
+  assert.equal((await anna('DELETE', `/api/swaps/${o3.id}`)).status, 200);
+  // Protokoll
+  const log = (await mgr('GET', '/api/log')).data;
+  assert.ok(log.some((l) => l.action === 'swap.done'));
+});

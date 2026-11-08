@@ -176,15 +176,19 @@ function renderCell(s, staffUsers, compact = false) {
   const absentIds = new Map(absentOn(s.date).map((a) => [a.user_id, a]));
   const mine = s.assigned.some((a) => a.user_id === state.me.id);
 
-  const canAct = (a) => isMgr() || (a.user_id === state.me.id && partner.length);
+  const canAct = (a) => isMgr() || a.user_id === state.me.id;
+  const angebot = (a) => (s.angebote || []).find((o) => o.user_id === a.user_id);
+  const swapMark = (a) => (angebot(a) ? h('span', { class: 'swap-mark', title: angebot(a).status === 'angenommen' ? 'Tausch wartet auf Bestätigung' : 'in der Tauschbörse angeboten' }, '⇆') : null);
   const list = h('ul', {}, s.assigned.map((a) => compact
     // Wochenraster: Name anklicken öffnet die Aktionen (spart Platz in schmalen Zellen)
     ? h('li', { class: a.user_id === state.me.id ? 'me' : '', title: `${a.name}${a.qualification ? ` – ${a.qualification}` : ''}` },
-      canAct(a) ? h('button', { class: 'person-btn', onclick: () => personActions(s, a) }, avatar(a, 20), h('span', {}, a.name))
-        : h('span', { class: 'person' }, avatar(a, 20), h('span', {}, a.name)))
+      canAct(a) ? h('button', { class: 'person-btn', onclick: () => personActions(s, a) }, avatar(a, 20), h('span', {}, a.name), swapMark(a))
+        : h('span', { class: 'person' }, avatar(a, 20), h('span', {}, a.name), swapMark(a)))
     : h('li', { class: a.user_id === state.me.id ? 'me' : '', title: a.qualification },
-    h('span', { class: 'person' }, avatar(a, 20), a.name),
+    h('span', { class: 'person' }, avatar(a, 20), a.name, swapMark(a)),
     h('span', { class: 'li-actions' },
+      a.user_id === state.me.id && isStaffRole() && !angebot(a)
+        ? h('button', { class: 'tiny ghost', title: 'In der Tauschbörse anbieten', 'aria-label': 'Dienst in der Tauschbörse anbieten', onclick: async () => { if (await offerShift(s)) refresh(); } }, '⇆') : null,
       partner.length && (isMgr() || a.user_id === state.me.id)
         ? h('button', { class: 'tiny ghost', title: 'Auf verbundene Station umsetzen', 'aria-label': `${a.name} umsetzen`, onclick: () => moveShift(s, a) }, '⇄') : null,
       isMgr() ? h('button', { class: 'tiny danger', title: 'Austragen', 'aria-label': `${a.name} austragen`, onclick: () => unassign(s, a.user_id, a.name) }, '×') : null))));
@@ -239,9 +243,12 @@ function personActions(s, a) {
     `${s.type_name} · ${WD[weekday(s.date)]} ${fmtDate(s.date)} · ${s.unit_name}${a.qualification ? `\n${a.qualification}` : ''}`, null, [
       h('button', { type: 'button', class: 'ghost', onclick: () => close(null) }, 'Schließen'),
       isMgr() || self ? h('button', { type: 'button', class: 'danger', onclick: () => close('out') }, 'Austragen') : null,
+      self && isStaffRole() && !(s.angebote || []).some((o) => o.user_id === a.user_id)
+        ? h('button', { type: 'button', class: 'ghost', onclick: () => close('offer') }, '⇆ Anbieten') : null,
       partner.length && (isMgr() || self) ? h('button', { type: 'button', onclick: () => close('move') }, self && !isMgr() ? '⇄ Station wechseln' : '⇄ Umsetzen') : null,
     ])).then((r) => {
     if (r === 'move') return moveShift(s, a);
+    if (r === 'offer') return offerShift(s).then((ok) => ok && refresh());
     if (r === 'out') return unassign(s, a.user_id, isMgr() && !self ? a.name : undefined);
     return null;
   });

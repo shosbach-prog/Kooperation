@@ -228,6 +228,7 @@ const LOG_LABEL = {
   'absence.decide': 'Urlaub entschieden', 'absence.update': 'Abwesenheit geändert', 'absence.delete': 'Abwesenheit gelöscht',
   'attachment.upload': 'AU hochgeladen',
   'user.rights': 'Verwaltungsrechte geändert', 'user.create': 'Person angelegt', 'assignment.move': 'umgesetzt (Verbund)',
+  'swap.offer': 'Tausch angeboten', 'swap.take': 'Tausch angefragt', 'swap.done': 'getauscht', 'swap.decide': 'Tausch entschieden', 'swap.withdraw': 'Tauschangebot zurückgezogen',
 };
 async function renderLog() {
   const rows = await api('GET', 'api/log?limit=300');
