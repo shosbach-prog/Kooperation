@@ -1,0 +1,30 @@
+{
+  "name": "personaleinsatzplanung",
+  "version": "0.1.0",
+  "description": "Personaleinsatzplanung im Mehrschichtbetrieb mit Zeitkonto nach TVöD (Prototyp)",
+  "main": "server.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shosbach-prog/kooperation.git"
+  },
+  "license": "UNLICENSED",
+  "bugs": {
+    "url": "https://github.com/shosbach-prog/kooperation/issues"
+  },
+  "homepage": "https://github.com/shosbach-prog/kooperation#readme",
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=22.13"
+  }
+}

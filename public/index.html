@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Personaleinsatzplanung</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header id="topbar" hidden>
+    <div class="brand"><span class="logo">⊕</span> <span id="clinic-name">Personaleinsatzplanung</span></div>
+    <nav id="tabs"></nav>
+    <div class="who"><span id="who"></span> <button id="logout" class="ghost">Abmelden</button></div>
+  </header>
+
+  <main id="main"></main>
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <template id="login-tpl">
+    <section class="login card">
+      <h1>Personaleinsatzplanung</h1>
+      <p class="muted" data-clinic></p>
+      <form id="login-form">
+        <label>Benutzername <input name="username" autocomplete="username" required autofocus></label>
+        <label>Passwort <input name="password" type="password" autocomplete="current-password" required></label>
+        <button type="submit">Anmelden</button>
+        <p class="error" id="login-error"></p>
+      </form>
+    </section>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
