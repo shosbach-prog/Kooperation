@@ -326,7 +326,8 @@ async function renderPlan() {
     h('button', { class: 'ghost', onclick: () => window.print() }, 'Drucken'));
 
   const legend = h('div', { class: 'legend' },
-    h('span', { class: 'l-bad' }, 'unter Mindestbesetzung'), h('span', { class: 'l-ok' }, 'Mindestbesetzung erreicht'), h('span', { class: 'l-full' }, 'voll besetzt'));
+    h('span', { class: 'l-bad' }, 'unter Mindestbesetzung'), h('span', { class: 'l-covered' }, 'im Verbund ausgeglichen'),
+    h('span', { class: 'l-ok' }, 'Mindestbesetzung erreicht'), h('span', { class: 'l-full' }, 'voll besetzt'));
 
   const thead = h('tr', {}, h('th', {}, 'Dienst'), days.map((d) => {
     const wd = weekday(d); const hol = plan.holidays[d];
@@ -346,14 +347,15 @@ async function renderPlan() {
       lastBuilding = unit.building_id;
       tbody.push(h('tr', { class: 'building-row' }, h('td', { colspan: 8 }, unit.building_name || 'Ohne Gebäude')));
     }
-    tbody.push(h('tr', { class: 'unit-row' }, h('td', { colspan: 8 }, unit.name)));
+    tbody.push(h('tr', { class: 'unit-row' }, h('td', { colspan: 8 }, unit.name,
+      unit.verbund_name ? h('span', { class: 'verbund-tag', title: unit.verbund_gemeinsam ? 'gemeinsame Mindestbesetzung' : 'Umsetzen möglich' }, `⇄ ${unit.verbund_name}`) : null)));
     for (const t of shownTypes) {
       const rowShifts = days.map((d) => byKey.get(`${d}|${unit.id}|${t.id}`));
       if (!t.active && !rowShifts.some(Boolean)) continue;
       tbody.push(h('tr', {},
         h('td', { class: 'rowhead' }, h('span', { class: 'chip', style: { background: t.color } }, t.code), t.name,
           h('div', { class: 'time' }, `${t.start_time}–${t.end_time}`)),
-        rowShifts.map((s, i) => h('td', { class: [0, 6].includes(weekday(days[i])) ? 'weekend' : '' }, renderCell(s, staffUsers)))));
+        rowShifts.map((s, i) => h('td', { class: [0, 6].includes(weekday(days[i])) ? 'weekend' : '' }, renderCell(s, staffUsers, true)))));
     }
   }
 
@@ -410,7 +412,7 @@ function renderPlanPhone({ from, days, plan, byKey, staffUsers, activeUnits, sho
   const chips = h('div', { class: 'day-chips' }, days.map((d) => {
     const isToday = d === todayIso();
     const mineHere = plan.shifts.some((s) => s.date === d && s.assigned.some((a) => a.user_id === state.me.id));
-    const gap = plan.shifts.some((s) => s.date === d && (s.assigned.length < s.min_staff || s.qual_missing.length));
+    const gap = plan.shifts.some((s) => s.date === d && s.unterbesetzt);
     return h('button', {
       class: `day-chip${d === day ? ' active' : ''}${plan.holidays[d] ? ' holiday' : ''}${isToday ? ' today' : ''}`, 'aria-pressed': String(d === day),
       onclick: () => { state.day = d; renderPlan(); },
@@ -433,7 +435,8 @@ function renderPlanPhone({ from, days, plan, byKey, staffUsers, activeUnits, sho
           h('strong', {}, t.name), h('span', { class: 'muted small' }, `${s.start_time}–${s.end_time}`)),
         renderCell(s, staffUsers));
     }).filter(Boolean);
-    return cards.length ? h('section', {}, h('h3', {}, unit.name, unit.building_name ? h('span', { class: 'muted' }, unit.building_name) : null), cards) : null;
+    return cards.length ? h('section', {}, h('h3', {}, unit.name, unit.building_name ? h('span', { class: 'muted' }, unit.building_name) : null,
+      unit.verbund_name ? h('span', { class: 'verbund-tag' }, `⇄ ${unit.verbund_name}`) : null), cards) : null;
   });
   setMain(h('div', { class: 'card phone-plan' }, nav, unitSelect, chips, empty, head,
     blocks.some(Boolean) ? blocks : (empty ? null : h('p', { class: 'muted' }, 'An diesem Tag sind keine Dienste angelegt.'))));
@@ -456,17 +459,27 @@ function absLabel(a) {
   return a.status === 'beantragt' ? `${t} beantragt` : t;
 }
 
-function renderCell(s, staffUsers) {
+function renderCell(s, staffUsers, compact = false) {
   if (!s) return h('div', { class: 'cell none' }, '–');
   const n = s.assigned.length;
   const full = s.max_staff !== null && n >= s.max_staff;
-  const cls = n < s.min_staff || s.qual_missing.length ? 'bad' : full ? 'full' : 'ok';
+  const cls = s.unterbesetzt ? 'bad' : s.ausgeglichen ? 'covered' : full ? 'full' : 'ok';
+  const partner = s.verbund ? s.verbund.partner : [];
   const absentIds = new Map(absentOn(s.date).map((a) => [a.user_id, a]));
   const mine = s.assigned.some((a) => a.user_id === state.me.id);
 
-  const list = h('ul', {}, s.assigned.map((a) => h('li', { class: a.user_id === state.me.id ? 'me' : '', title: a.qualification },
+  const canAct = (a) => isMgr() || (a.user_id === state.me.id && partner.length);
+  const list = h('ul', {}, s.assigned.map((a) => compact
+    // Wochenraster: Name anklicken öffnet die Aktionen (spart Platz in schmalen Zellen)
+    ? h('li', { class: a.user_id === state.me.id ? 'me' : '', title: `${a.name}${a.qualification ? ` – ${a.qualification}` : ''}` },
+      canAct(a) ? h('button', { class: 'person-btn', onclick: () => personActions(s, a) }, avatar(a, 20), h('span', {}, a.name))
+        : h('span', { class: 'person' }, avatar(a, 20), h('span', {}, a.name)))
+    : h('li', { class: a.user_id === state.me.id ? 'me' : '', title: a.qualification },
     h('span', { class: 'person' }, avatar(a, 20), a.name),
-    isMgr() ? h('button', { class: 'tiny danger', title: 'Austragen', onclick: () => unassign(s, a.user_id, a.name) }, '×') : null)));
+    h('span', { class: 'li-actions' },
+      partner.length && (isMgr() || a.user_id === state.me.id)
+        ? h('button', { class: 'tiny ghost', title: 'Auf verbundene Station umsetzen', 'aria-label': `${a.name} umsetzen`, onclick: () => moveShift(s, a) }, '⇄') : null,
+      isMgr() ? h('button', { class: 'tiny danger', title: 'Austragen', 'aria-label': `${a.name} austragen`, onclick: () => unassign(s, a.user_id, a.name) }, '×') : null))));
 
   const count = h('div', { class: 'count' },
     h('span', {}, `${n}/${s.max_staff ?? '∞'} · min ${s.min_staff}`),
@@ -477,7 +490,7 @@ function renderCell(s, staffUsers) {
     const free = staffUsers.filter((u) => !s.assigned.some((a) => a.user_id === u.id));
     if (free.length) {
       action = h('select', { onchange: (e) => { if (e.target.value) assign(s, Number(e.target.value)); } },
-        h('option', { value: '' }, '+ Person eintragen'), free.map((u) => {
+        h('option', { value: '' }, compact ? '+ Person' : '+ Person eintragen'), free.map((u) => {
           const ab = absentIds.get(u.id);
           return h('option', { value: u.id, disabled: !!ab }, `${u.name}${u.qualification ? ' – ' + u.qualification : ''}${ab ? ` (${absLabel(ab)})` : ''}`);
         }));
@@ -489,9 +502,68 @@ function renderCell(s, staffUsers) {
   } else if (!full) {
     action = h('button', { class: 'tiny', onclick: () => assign(s) }, 'Eintragen');
   }
-  const missing = s.qual_missing.length
-    ? h('div', { class: 'missing' }, 'fehlt: ', s.qual_missing.map((q) => `${q.need - q.have}× ${q.qualification}`).join(', ')) : null;
-  return h('div', { class: `cell ${cls}` }, count, list, missing, s.note ? h('div', { class: 'note' }, s.note) : null, action);
+  const qm = s.verbund?.gemeinsam ? s.verbund.qual_missing : s.qual_missing;
+  const missing = s.unterbesetzt && qm.length
+    ? h('div', { class: 'missing' }, `fehlt${s.verbund?.gemeinsam ? ' im Verbund' : ''}: `, qm.map((q) => `${q.need - q.have}× ${q.qualification}`).join(', ')) : null;
+  // Verbund: gemeinsame Besetzung und mögliche Aushilfe aus der Nachbarstation
+  let verbundInfo = null;
+  if (s.verbund) {
+    const v = s.verbund;
+    const helfer = partner.filter((p) => p.besetzt > p.min_staff);
+    const tip = `${v.name} (${[s.unit_name, ...partner.map((p) => p.unit_name)].join(' + ')}): ${v.besetzt} von mind. ${v.min} besetzt`
+      + `${s.ausgeglichen ? ' – im Verbund ausgeglichen' : ''}${helfer.length ? ` – Aushilfe möglich: ${helfer.map((p) => `${p.unit_name} (+${p.besetzt - p.min_staff})`).join(', ')}` : ''}`;
+    verbundInfo = compact
+      ? h('div', { class: `verbund-info${v.gemeinsam && v.gedeckt ? ' ok' : ''}`, title: tip },
+        `⇄ ${v.besetzt}/${v.min}${s.ausgeglichen ? ' ausgeglichen' : ''}${s.unterbesetzt && helfer.length ? ` · Hilfe: ${helfer.map((p) => p.unit_name).join(', ')}` : ''}`)
+      : h('div', { class: `verbund-info${v.gemeinsam && v.gedeckt ? ' ok' : ''}`, title: tip },
+        h('span', {}, `⇄ ${v.name}: ${v.besetzt}/${v.min}`),
+        s.ausgeglichen ? h('span', {}, ' · im Verbund ausgeglichen') : null,
+        s.unterbesetzt && helfer.length ? h('span', {}, ` · Aushilfe möglich: ${helfer.map((p) => `${p.unit_name} (+${p.besetzt - p.min_staff})`).join(', ')}`) : null);
+  }
+  return h('div', { class: `cell ${cls}` }, count, list, missing, verbundInfo, s.note ? h('div', { class: 'note' }, s.note) : null, action);
+}
+
+/** Aktionen zu einer eingetragenen Person (Wochenraster) */
+function personActions(s, a) {
+  const partner = s.verbund ? s.verbund.partner : [];
+  const self = a.user_id === state.me.id;
+  return openDialog((close) => dialogShell(a.name,
+    `${s.type_name} · ${WD[weekday(s.date)]} ${fmtDate(s.date)} · ${s.unit_name}${a.qualification ? `\n${a.qualification}` : ''}`, null, [
+      h('button', { type: 'button', class: 'ghost', onclick: () => close(null) }, 'Schließen'),
+      isMgr() || self ? h('button', { type: 'button', class: 'danger', onclick: () => close('out') }, 'Austragen') : null,
+      partner.length && (isMgr() || self) ? h('button', { type: 'button', onclick: () => close('move') }, self && !isMgr() ? '⇄ Station wechseln' : '⇄ Umsetzen') : null,
+    ])).then((r) => {
+    if (r === 'move') return moveShift(s, a);
+    if (r === 'out') return unassign(s, a.user_id, isMgr() && !self ? a.name : undefined);
+    return null;
+  });
+}
+
+/** Person innerhalb des Verbunds auf eine verbundene Station umsetzen (gleitendes Aufstocken) */
+async function moveShift(s, a, force = false) {
+  const partner = s.verbund.partner;
+  const self = a.user_id === state.me.id && !isMgr();
+  const r = await uiForm({
+    title: self ? 'Station wechseln' : `${a.name} umsetzen`,
+    message: `${s.type_name} am ${WD[weekday(s.date)]} ${fmtDate(s.date)} · von ${s.unit_name}`,
+    okText: 'Umsetzen',
+    fields: [
+      { name: 'to', label: 'auf Station', type: 'select', value: partner.find((p) => p.besetzt < p.min_staff)?.shift_id ?? partner[0].shift_id,
+        options: partner.map((p) => [p.shift_id, `${p.unit_name} – ${p.besetzt}/${p.max_staff ?? '∞'}, min ${p.min_staff}${p.besetzt < p.min_staff ? ' (unterbesetzt)' : ''}`]) },
+      { name: 'reason', label: 'Grund (optional)', type: 'textarea', rows: 2, placeholder: 'z. B. Aufnahme, erhöhter Betreuungsbedarf', maxlength: 500 },
+    ],
+  });
+  if (!r) return;
+  try {
+    await api('POST', `api/shifts/${s.id}/move`, { to_shift_id: Number(r.to), user_id: isMgr() ? a.user_id : undefined, reason: r.reason, force });
+    toast('Umgesetzt.');
+  } catch (e) {
+    if (isMgr() && !force && e.code === 'VOLL' && await uiConfirm(`${e.message} Trotzdem umsetzen?`, { title: 'Ausnahme', okText: 'Trotzdem umsetzen' })) {
+      return moveShift(s, a, true);
+    }
+    toast(e.message, true);
+  }
+  refresh();
 }
 
 // ---------- Dialoge (ersetzen prompt/confirm/alert; auf dem Handy als Einblendung von unten) ----------
@@ -938,8 +1010,8 @@ function fotoControl(u, url, onDone) {
 
 // ---------- Campus & Stationen (Verwaltung) ----------
 async function renderStations() {
-  const [units, buildings, users, types] = await Promise.all([
-    api('GET', 'api/units'), api('GET', 'api/buildings'), api('GET', 'api/users'), api('GET', 'api/shift-types'),
+  const [units, buildings, users, types, verbuende] = await Promise.all([
+    api('GET', 'api/units'), api('GET', 'api/buildings'), api('GET', 'api/users'), api('GET', 'api/shift-types'), api('GET', 'api/verbuende'),
   ]);
   const people = users.filter((u) => u.active).sort((a, b) => a.name.localeCompare(b.name, 'de'));
   const leitungSelect = (cur) => h('select', {}, h('option', { value: '' }, '– keine –'),
@@ -961,6 +1033,7 @@ async function renderStations() {
       h('div', { class: 'station-meta' },
         h('span', {}, `👥 ${u.personal} Person(en)`),
         u.leitung_name ? h('span', {}, `Leitung: ${u.leitung_name}`) : null,
+        u.verbund_name ? h('span', { class: 'verbund-tag', style: { marginLeft: 0 } }, `⇄ ${u.verbund_name}`) : null,
         u.telefon ? h('a', { href: `tel:${u.telefon.replace(/[^\d+]/g, '')}` }, `☎ ${u.telefon}`) : null),
       h('details', { class: 'edit' }, h('summary', {}, 'Bearbeiten'),
         h('div', { class: 'row' }, h('label', {}, 'Name', name), h('label', {}, 'Kürzel', kuerzel), h('label', {}, 'Telefon', telefon),
@@ -1016,6 +1089,61 @@ async function renderStations() {
     save(() => api(b ? 'PUT' : 'POST', b ? `api/buildings/${b.id}` : 'api/buildings', body), b ? 'Gebäude gespeichert.' : 'Gebäude angelegt.');
   };
 
+  // --- Stationsverbünde ---
+  const verbundForm = (v) => openDialog((close) => {
+    const name = h('input', { value: v?.name || '', maxlength: 80, required: true, placeholder: 'z. B. Verbund Akut 1 + 2' });
+    const beschreibung = h('input', { value: v?.beschreibung || '', maxlength: 300, placeholder: 'z. B. gemeinsamer Flur, Durchgang im 1. OG' });
+    const gemeinsam = h('input', { type: 'checkbox', checked: v ? !!v.gemeinsam : true });
+    const err = h('p', { class: 'error' });
+    const boxes = units.filter((u) => u.active).map((u) => {
+      const cb = h('input', { type: 'checkbox', value: u.id, checked: v ? u.verbund_id === v.id : false });
+      const other = u.verbund_id && (!v || u.verbund_id !== v.id) ? ` (bisher ${u.verbund_name || 'anderer Verbund'})` : '';
+      return h('label', { class: 'check' }, cb, `${u.name}${u.building_name ? ` · ${u.building_name}` : ''}${other}`);
+    });
+    const form = dialogShell(v ? 'Verbund bearbeiten' : 'Neuer Stationsverbund',
+      'Stationen, die direkt zusammenhängen und sich gegenseitig mit Personal aushelfen.',
+      h('div', { class: 'ui-dialog-fields' },
+        h('label', {}, 'Name', name), h('label', {}, 'Beschreibung (optional)', beschreibung),
+        h('fieldset', {}, h('legend', {}, 'Stationen im Verbund'), h('div', { class: 'check-list' }, boxes)),
+        h('label', { class: 'check' }, gemeinsam, h('span', {}, h('strong', {}, 'Gemeinsame Mindestbesetzung'),
+          h('span', { class: 'small muted', style: { display: 'block' } },
+            'Fehlt auf einer Station Personal, gilt der Dienst als gedeckt, wenn der Verbund insgesamt genug Personal hat. ',
+            'Ohne Haken lässt sich nur umsetzen; jede Station muss ihr Minimum selbst erreichen.'))),
+        err),
+      [h('button', { type: 'button', class: 'ghost', onclick: () => close(null) }, 'Abbrechen'), h('button', { type: 'submit' }, v ? 'Speichern' : 'Anlegen')]);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const unitIds = boxes.map((l) => l.querySelector('input')).filter((c) => c.checked).map((c) => Number(c.value));
+      if (!name.value.trim()) { err.textContent = 'Bitte einen Namen angeben.'; return; }
+      if (unitIds.length < 2) { err.textContent = 'Bitte mindestens zwei Stationen auswählen.'; return; }
+      try {
+        await api(v ? 'PUT' : 'POST', v ? `api/verbuende/${v.id}` : 'api/verbuende',
+          { name: name.value, beschreibung: beschreibung.value, gemeinsam: gemeinsam.checked, unit_ids: unitIds });
+        close(true);
+      } catch (ex) { err.textContent = ex.message; }
+    });
+    return form;
+  }).then((ok) => { if (ok) { toast('Verbund gespeichert.'); renderStations(); } });
+
+  const verbundCard = h('section', { class: 'card' },
+    h('div', { class: 'campus-head' },
+      h('div', {}, h('h2', {}, 'Stationsverbünde'),
+        h('p', { class: 'small muted', style: { margin: '.2rem 0 0' } },
+          'Zusammenhängende Stationen gleichen Personal gleitend aus: Personen lassen sich im Dienstplan mit ⇄ umsetzen, ',
+          'und bei gemeinsamer Mindestbesetzung zählt die Besetzung des ganzen Verbunds.')),
+      h('div', { class: 'toolbar', style: { margin: 0 } }, h('button', { onclick: () => verbundForm(null) }, '+ Verbund'))),
+    verbuende.length ? h('div', { class: 'campus-stations' }, verbuende.map((v) => h('div', { class: `card station${v.active ? '' : ' inactive'}` },
+      h('div', { class: 'station-head' }, h('h3', {}, `⇄ ${v.name}`),
+        h('span', { class: `badge ${v.gemeinsam ? 'ok' : 'warn'}` }, v.gemeinsam ? 'gemeinsame Mindestbesetzung' : 'nur Umsetzen')),
+      h('div', { class: 'station-meta' }, h('span', {}, v.stationsnamen || 'keine Stationen'), v.beschreibung ? h('span', {}, v.beschreibung) : null),
+      h('div', { class: 'toolbar', style: { margin: 0 } },
+        h('button', { class: 'ghost', onclick: () => verbundForm(v) }, 'Bearbeiten'),
+        h('button', { class: 'danger', onclick: async () => {
+          if (!await uiConfirm(`„${v.name}“ wird aufgelöst. Die Stationen bleiben erhalten und zählen wieder einzeln.`, { title: 'Verbund auflösen?', okText: 'Auflösen', danger: true })) return;
+          save(() => api('DELETE', `api/verbuende/${v.id}`), 'Verbund aufgelöst.');
+        } }, 'Auflösen')))))
+      : h('p', { class: 'muted' }, 'Noch keine Verbünde. Beispiel: Station 1 und 2 liegen auf einem Flur und helfen sich gegenseitig aus.'));
+
   const buildingSection = (b, list) => h('section', { class: `card campus-building${b && !b.active ? ' inactive' : ''}` },
     h('div', { class: 'campus-head' },
       h('div', {}, h('h2', {}, b ? (b.kuerzel ? `${b.name} (${b.kuerzel})` : b.name) : 'Ohne Gebäude'),
@@ -1049,6 +1177,7 @@ async function renderStations() {
         'Gebäude und Stationen erscheinen im Dienstplan (Auswahl „Gebäude – alle Stationen“), in der Personalakte und in den Auswertungen. ',
         types.length ? '' : 'Tipp: Legen Sie unter „Dienstzeiten“ auch die Dienste an.')),
     buildings.map((b) => buildingSection(b, units.filter((u) => u.building_id === b.id))),
+    verbundCard,
     ohne.length || !buildings.length ? buildingSection(null, ohne) : null);
 }
 
@@ -1724,7 +1853,7 @@ const LOG_LABEL = {
   'assignment.add': 'eingetragen', 'assignment.remove': 'ausgetragen', 'absence.create': 'Abwesenheit angelegt',
   'absence.decide': 'Urlaub entschieden', 'absence.update': 'Abwesenheit geändert', 'absence.delete': 'Abwesenheit gelöscht',
   'attachment.upload': 'AU hochgeladen',
-  'user.rights': 'Verwaltungsrechte geändert', 'user.create': 'Person angelegt',
+  'user.rights': 'Verwaltungsrechte geändert', 'user.create': 'Person angelegt', 'assignment.move': 'umgesetzt (Verbund)',
 };
 async function renderLog() {
   const rows = await api('GET', 'api/log?limit=300');

@@ -84,6 +84,14 @@ CREATE TABLE IF NOT EXISTS buildings (
   active INTEGER NOT NULL DEFAULT 1
 );
 
+CREATE TABLE IF NOT EXISTS verbuende (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  gemeinsam INTEGER NOT NULL DEFAULT 1,
+  beschreibung TEXT NOT NULL DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1
+);
+
 CREATE TABLE IF NOT EXISTS units (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
@@ -194,6 +202,9 @@ function seed(db, withDemo) {
   const insUnit = db.prepare('INSERT INTO units (name, building_id) VALUES (?, ?)');
   const u1 = insUnit.run('Station 1', hausA).lastInsertRowid;
   const u2 = insUnit.run('Station 2', hausA).lastInsertRowid;
+  // Demo: Station 1 und 2 hängen zusammen und gleichen Personal untereinander aus
+  const vb = db.prepare("INSERT INTO verbuende (name, beschreibung) VALUES ('Verbund Haus A', 'Station 1 und 2 auf einem Flur')").run().lastInsertRowid;
+  db.prepare('UPDATE units SET verbund_id = ? WHERE id IN (?, ?)').run(vb, u1, u2);
 
   const insType = db.prepare('INSERT INTO shift_types (name, code, start_time, end_time, break_min, color) VALUES (?, ?, ?, ?, ?, ?)');
   const f = insType.run('Frühdienst', 'F', '06:00', '14:30', 30, '#e9a23b').lastInsertRowid;
@@ -255,6 +266,7 @@ function migrate(db) {
   add('units', "telefon TEXT NOT NULL DEFAULT ''");
   add('units', 'leitung_id INTEGER');
   add('units', 'building_id INTEGER REFERENCES buildings(id) ON DELETE SET NULL');
+  add('units', 'verbund_id INTEGER REFERENCES verbuende(id) ON DELETE SET NULL');
   // Abwesenheitsarten erweitern (CHECK-Bedingung erfordert Neuaufbau der Tabelle)
   const absSql = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'absences'").get()?.sql || '';
   if (!absSql.includes('zusatzurlaub')) {

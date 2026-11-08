@@ -9,6 +9,7 @@ Arbeitszeit wird angelehnt an den **TVöD (BT-K)** angerechnet.
 - **Dienstzeiten** festlegen (z. B. Früh-, Spät- und Nachtdienst) mit Beginn, Ende und Pause, auch über Mitternacht
 - **Campus & Stationen:** Gebäude/Häuser anlegen (Name, Kürzel, Lage, Reihenfolge) und Stationen darin verwalten (Name, Kürzel, Telefon, Stationsleitung, aktiv); beim Anlegen einer Station die Mindestbesetzung von einer anderen übernehmen. Dienstplan und Personal lassen sich nach „Gebäude – alle Stationen“ oder einzelner Station filtern
 - **Mindestbesetzung** (und optionale Höchstbesetzung) je Station, Dienst und Wochentag festlegen
+- **Stationsverbünde:** Zusammenhängende Stationen (z. B. auf einem Flur) zu einem Verbund verknüpfen. Personal lässt sich im Dienstplan mit ⇄ **gleitend umsetzen** (Verwaltung für alle, Mitarbeitende für sich selbst); mit **gemeinsamer Mindestbesetzung** gilt ein Dienst als gedeckt, wenn der Verbund insgesamt genug Personal und die nötigen Qualifikationen hat (Anzeige „im Verbund ausgeglichen“, Hinweis „Aushilfe möglich aus …“). Austragen wird dann gegen die Verbundbesetzung geprüft; jedes Umsetzen steht im Protokoll
 - **Mindestbesetzung nach Qualifikation**, z. B. „in jedem Dienst mindestens 1 Pflegefachkraft“, wahlweise je Station und/oder Dienst
 - **Qualifikationen** frei konfigurierbar (Einstellungen)
 - **Plan erzeugen:** Schichten für einen Zeitraum automatisch aus der Mindestbesetzung anlegen

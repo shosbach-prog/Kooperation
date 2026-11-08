@@ -450,9 +450,11 @@ function createApp(db, opts = {}) {
 
   // ---------- Bereiche / Stationen ----------
   const loadUnits = () => db.prepare(`SELECT un.*, l.name AS leitung_name, b.name AS building_name, b.kuerzel AS building_kuerzel,
+      vb.name AS verbund_name, vb.gemeinsam AS verbund_gemeinsam,
       (SELECT COUNT(*) FROM users x WHERE x.stammbereich_id = un.id AND x.active = 1) AS personal
     FROM units un LEFT JOIN users l ON l.id = un.leitung_id LEFT JOIN buildings b ON b.id = un.building_id
-    ORDER BY un.active DESC, COALESCE(b.sort, 9999), b.name, un.name`).all();
+    LEFT JOIN verbuende vb ON vb.id = un.verbund_id AND vb.active = 1
+    ORDER BY un.active DESC, COALESCE(b.sort, 9999), b.name, COALESCE(vb.name, un.name), un.name`).all();
   const unitFields = (b, cur = {}) => {
     const v = { ...cur, ...b };
     const name = String(v.name ?? '').trim().slice(0, 80);
@@ -501,6 +503,51 @@ function createApp(db, opts = {}) {
     db.prepare('UPDATE users SET stammbereich_id = NULL WHERE stammbereich_id = ?').run(id);
     db.prepare('DELETE FROM units WHERE id = ?').run(id);
     audit(req.user.id, 'unit.delete', { id });
+    return { ok: true };
+  }));
+
+  // ---------- Stationsverbünde ----------
+  const loadVerbuende = () => db.prepare(`SELECT v.*,
+      (SELECT COUNT(*) FROM units u WHERE u.verbund_id = v.id AND u.active = 1) AS stationen,
+      (SELECT group_concat(u.name, ', ') FROM units u WHERE u.verbund_id = v.id AND u.active = 1) AS stationsnamen
+    FROM verbuende v ORDER BY v.active DESC, v.name`).all();
+  const verbundFields = (b, cur = {}) => {
+    const v = { ...cur, ...b };
+    const name = String(v.name ?? '').trim().slice(0, 80);
+    if (!name) throw new HttpError(400, 'Bitte einen Namen für den Verbund angeben.');
+    if (db.prepare('SELECT 1 FROM verbuende WHERE lower(name) = lower(?) AND id <> ?').get(name, cur.id || 0)) throw new HttpError(409, 'Einen Verbund mit diesem Namen gibt es schon.');
+    return { name, beschreibung: String(v.beschreibung ?? '').trim().slice(0, 300), gemeinsam: v.gemeinsam === undefined ? 1 : (v.gemeinsam ? 1 : 0),
+      active: v.active === undefined ? 1 : (v.active ? 1 : 0) };
+  };
+  const setVerbundUnits = (id, unitIds) => {
+    if (!Array.isArray(unitIds)) return;
+    db.prepare('UPDATE units SET verbund_id = NULL WHERE verbund_id = ?').run(id);
+    const upd = db.prepare('UPDATE units SET verbund_id = ? WHERE id = ?');
+    for (const u of unitIds) upd.run(id, Number(u));
+  };
+  app.get('/api/verbuende', auth, wrap(() => loadVerbuende()));
+  app.post('/api/verbuende', auth, manager, wrap((req) => {
+    const f = verbundFields(req.body || {});
+    const id = db.prepare('INSERT INTO verbuende (name, beschreibung, gemeinsam, active) VALUES (?, ?, ?, ?)').run(f.name, f.beschreibung, f.gemeinsam, f.active).lastInsertRowid;
+    setVerbundUnits(id, req.body.unit_ids);
+    audit(req.user.id, 'verbund.create', { id, ...f, unit_ids: req.body.unit_ids });
+    return loadVerbuende().find((v) => v.id === id);
+  }));
+  app.put('/api/verbuende/:id', auth, manager, wrap((req) => {
+    const id = Number(req.params.id);
+    const cur = db.prepare('SELECT * FROM verbuende WHERE id = ?').get(id);
+    if (!cur) throw new HttpError(404, 'Verbund nicht gefunden.');
+    const f = verbundFields(req.body || {}, cur);
+    db.prepare('UPDATE verbuende SET name = ?, beschreibung = ?, gemeinsam = ?, active = ? WHERE id = ?').run(f.name, f.beschreibung, f.gemeinsam, f.active, id);
+    setVerbundUnits(id, req.body.unit_ids);
+    audit(req.user.id, 'verbund.update', { id, ...f, unit_ids: req.body.unit_ids });
+    return loadVerbuende().find((v) => v.id === id);
+  }));
+  app.delete('/api/verbuende/:id', auth, manager, wrap((req) => {
+    const id = Number(req.params.id);
+    db.prepare('UPDATE units SET verbund_id = NULL WHERE verbund_id = ?').run(id);
+    db.prepare('DELETE FROM verbuende WHERE id = ?').run(id);
+    audit(req.user.id, 'verbund.delete', { id });
     return { ok: true };
   }));
 
@@ -742,22 +789,83 @@ function createApp(db, opts = {}) {
   }));
 
   // ---------- Dienstplan ----------
+  const assignedFor = (ids) => {
+    const byShift = new Map(ids.map((id) => [id, []]));
+    if (!ids.length) return byShift;
+    const rows = db.prepare(`SELECT a.shift_id, us.id AS user_id, us.name, us.qualification, us.foto_version FROM assignments a
+      JOIN users us ON us.id = a.user_id WHERE a.shift_id IN (${ids.map(() => '?').join(',')}) ORDER BY us.name`).all(...ids);
+    for (const a of rows) byShift.get(a.shift_id).push({ user_id: a.user_id, name: a.name, qualification: a.qualification, foto_version: a.foto_version });
+    return byShift;
+  };
+
+  /** Benötigte Qualifikationen einer Schicht (je Qualifikation die höchste Mindestzahl) */
+  const qualNeeds = (shift, rules) => {
+    const needs = new Map();
+    for (const r of rules) {
+      if ((r.unit_id === null || r.unit_id === shift.unit_id) && (r.shift_type_id === null || r.shift_type_id === shift.shift_type_id)) {
+        needs.set(r.qualification, Math.max(needs.get(r.qualification) || 0, r.min_count));
+      }
+    }
+    return needs;
+  };
+
+  /**
+   * Stationsverbund: Schichten derselben Dienstart am selben Tag in verbundenen Stationen werden gemeinsam betrachtet.
+   * Bei „gemeinsamer Mindestbesetzung“ gilt eine Schicht als gedeckt, wenn der Verbund insgesamt gedeckt ist.
+   */
+  const verbundGroup = (date, typeId, verbundId, rules, withoutUserId = null) => {
+    const members = db.prepare(`SELECT s.*, u.name AS unit_name FROM shifts s JOIN units u ON u.id = s.unit_id
+      WHERE u.verbund_id = ? AND s.date = ? AND s.shift_type_id = ? AND u.active = 1 ORDER BY u.name`).all(verbundId, date, typeId);
+    const asg = assignedFor(members.map((m) => m.id));
+    const needs = new Map();
+    let besetzt = 0, min = 0;
+    const people = [];
+    for (const m of members) {
+      const list = asg.get(m.id).filter((p) => p.user_id !== withoutUserId);
+      besetzt += list.length;
+      min += m.min_staff;
+      people.push(...list);
+      for (const [q, n] of qualNeeds(m, rules)) needs.set(q, (needs.get(q) || 0) + n);
+    }
+    const qual_missing = [...needs].map(([qualification, need]) => ({ qualification, need, have: people.filter((p) => p.qualification === qualification).length }))
+      .filter((x) => x.have < x.need);
+    return {
+      besetzt, min, qual_missing, gedeckt: besetzt >= min && qual_missing.length === 0,
+      stationen: members.map((m) => ({
+        shift_id: m.id, unit_id: m.unit_id, unit_name: m.unit_name, besetzt: asg.get(m.id).length, min_staff: m.min_staff, max_staff: m.max_staff,
+      })),
+    };
+  };
+
   const loadShifts = (where, params) => {
-    const shifts = db.prepare(`SELECT s.*, st.name AS type_name, st.code AS type_code, st.color AS type_color, u.name AS unit_name
+    const shifts = db.prepare(`SELECT s.*, st.name AS type_name, st.code AS type_code, st.color AS type_color, u.name AS unit_name,
+        CASE WHEN v.id IS NULL THEN NULL ELSE u.verbund_id END AS verbund_id, v.name AS verbund_name, v.gemeinsam AS verbund_gemeinsam
       FROM shifts s JOIN shift_types st ON st.id = s.shift_type_id JOIN units u ON u.id = s.unit_id
+      LEFT JOIN verbuende v ON v.id = u.verbund_id AND v.active = 1
       WHERE ${where} ORDER BY s.date, s.start_time, u.name`).all(...params);
     if (!shifts.length) return [];
-    const ids = shifts.map((s) => s.id);
-    const assigned = db.prepare(`SELECT a.shift_id, us.id AS user_id, us.name, us.qualification, us.foto_version FROM assignments a
-      JOIN users us ON us.id = a.user_id WHERE a.shift_id IN (${ids.map(() => '?').join(',')}) ORDER BY us.name`).all(...ids);
-    const byShift = new Map(ids.map((id) => [id, []]));
-    for (const a of assigned) byShift.get(a.shift_id).push({ user_id: a.user_id, name: a.name, qualification: a.qualification, foto_version: a.foto_version });
+    const byShift = assignedFor(shifts.map((s) => s.id));
     const rules = loadRules();
+    const groups = new Map();
     return shifts.map((s) => {
       const list = byShift.get(s.id);
-      return { ...s, hours: T.shiftHours(s), holiday: T.holidayName(s.date), assigned: list, qual_missing: qualMissing(s, list, rules) };
+      const out = { ...s, hours: T.shiftHours(s), holiday: T.holidayName(s.date), assigned: list, qual_missing: qualMissing(s, list, rules), verbund: null };
+      if (s.verbund_id) {
+        const key = `${s.date}|${s.shift_type_id}|${s.verbund_id}`;
+        if (!groups.has(key)) groups.set(key, verbundGroup(s.date, s.shift_type_id, s.verbund_id, rules));
+        const g = groups.get(key);
+        out.verbund = {
+          id: s.verbund_id, name: s.verbund_name, gemeinsam: !!s.verbund_gemeinsam, besetzt: g.besetzt, min: g.min,
+          qual_missing: g.qual_missing, gedeckt: g.gedeckt, partner: g.stationen.filter((x) => x.shift_id !== s.id),
+        };
+      }
+      const eigenOk = list.length >= s.min_staff && out.qual_missing.length === 0;
+      out.ausgeglichen = !eigenOk && !!(out.verbund && out.verbund.gemeinsam && out.verbund.gedeckt);
+      out.unterbesetzt = !eigenOk && !out.ausgeglichen;
+      return out;
     });
   };
+
 
   /** Abwesenheiten (Urlaub beantragt/genehmigt, Krankheit), die ein Datum abdecken */
   const absenceOn = (userId, date) => db.prepare(`SELECT * FROM absences WHERE user_id = ? AND ? BETWEEN from_date AND to_date
@@ -881,8 +989,18 @@ function createApp(db, opts = {}) {
       if (hoursLeft < Number(settings.austrag_frist_std)) {
         throw new HttpError(400, `Austragen ist nur bis ${settings.austrag_frist_std} Std. vor Dienstbeginn möglich. Bitte wenden Sie sich an die Einsatzplanung.`, 'FRIST');
       }
-      if (!settings.austrag_unter_minimum) {
-        const current = loadShifts('s.id = ?', [shift.id])[0];
+      const current = loadShifts('s.id = ?', [shift.id])[0];
+      if (!settings.austrag_unter_minimum && current.verbund?.gemeinsam) {
+        // im Verbund zählt die gemeinsame Besetzung aller verbundenen Stationen
+        const g = verbundGroup(shift.date, shift.shift_type_id, current.verbund.id, loadRules(), userId);
+        if (g.besetzt < g.min) {
+          throw new HttpError(400, `Austragen nicht möglich: Die gemeinsame Mindestbesetzung im ${current.verbund.name} (${g.min}) würde unterschritten. Bitte Ersatz finden oder die Einsatzplanung kontaktieren.`, 'MINIMUM');
+        }
+        if (g.qual_missing.length > current.verbund.qual_missing.length) {
+          const q = g.qual_missing[0];
+          throw new HttpError(400, `Austragen nicht möglich: Im ${current.verbund.name} werden mindestens ${q.need}× ${q.qualification} benötigt.`, 'QUALIFIKATION');
+        }
+      } else if (!settings.austrag_unter_minimum) {
         if (current.assigned.length - 1 < shift.min_staff) {
           throw new HttpError(400, `Austragen nicht möglich: Die Mindestbesetzung (${shift.min_staff}) würde unterschritten. Bitte Ersatz finden oder die Einsatzplanung kontaktieren.`, 'MINIMUM');
         }
@@ -898,11 +1016,48 @@ function createApp(db, opts = {}) {
     return loadShifts('s.id = ?', [shift.id])[0];
   }));
 
+  /**
+   * Umsetzen innerhalb eines Stationsverbunds (gleitendes Aufstocken):
+   * Person wechselt in denselben Dienst am selben Tag auf einer verbundenen Station.
+   */
+  app.post('/api/shifts/:id/move', auth, wrap((req) => {
+    const settings = getSettings();
+    const from = db.prepare(`SELECT s.*, u.verbund_id, u.name AS unit_name FROM shifts s JOIN units u ON u.id = s.unit_id WHERE s.id = ?`).get(Number(req.params.id));
+    const to = db.prepare(`SELECT s.*, u.verbund_id, u.name AS unit_name FROM shifts s JOIN units u ON u.id = s.unit_id WHERE s.id = ?`).get(Number(req.body?.to_shift_id));
+    if (!from || !to) throw new HttpError(404, 'Schicht nicht gefunden.');
+    const verbund = from.verbund_id ? db.prepare('SELECT * FROM verbuende WHERE id = ? AND active = 1').get(from.verbund_id) : null;
+    if (!verbund || to.verbund_id !== from.verbund_id || to.id === from.id || to.date !== from.date || to.shift_type_id !== from.shift_type_id) {
+      throw new HttpError(400, 'Umsetzen ist nur in denselben Dienst einer verbundenen Station möglich.', 'KEIN_VERBUND');
+    }
+    const isMgr = hasMgr(req.user);
+    const userId = isMgr && req.body?.user_id ? Number(req.body.user_id) : req.user.id;
+    if (!db.prepare('SELECT 1 FROM assignments WHERE shift_id = ? AND user_id = ?').get(from.id, userId)) throw new HttpError(404, 'Person ist in diesem Dienst nicht eingetragen.');
+    if (db.prepare('SELECT 1 FROM assignments WHERE shift_id = ? AND user_id = ?').get(to.id, userId)) throw new HttpError(409, 'Bereits auf der anderen Station eingetragen.');
+    const force = isMgr && !!req.body?.force;
+    if (!isMgr && T.shiftInterval(from.date, from.start_time, from.end_time).start <= nowLocalMs()) throw new HttpError(400, 'Der Dienst hat bereits begonnen.');
+    const nTo = db.prepare('SELECT COUNT(*) AS n FROM assignments WHERE shift_id = ?').get(to.id).n;
+    if (to.max_staff !== null && nTo >= to.max_staff && !force) throw new HttpError(409, `${to.unit_name} ist in diesem Dienst bereits voll besetzt.`, 'VOLL');
+    // ohne gemeinsame Mindestbesetzung darf die abgebende Station nicht unter ihr Minimum fallen (außer Verwaltung)
+    if (!verbund.gemeinsam && !isMgr && !settings.austrag_unter_minimum) {
+      const nFrom = db.prepare('SELECT COUNT(*) AS n FROM assignments WHERE shift_id = ?').get(from.id).n;
+      if (nFrom - 1 < from.min_staff) throw new HttpError(400, `Wechsel nicht möglich: ${from.unit_name} würde unter die Mindestbesetzung fallen.`, 'MINIMUM');
+    }
+    const reason = String(req.body?.reason || '').trim().slice(0, 500);
+    db.exec('BEGIN');
+    try {
+      db.prepare('DELETE FROM assignments WHERE shift_id = ? AND user_id = ?').run(from.id, userId);
+      db.prepare('INSERT INTO assignments (shift_id, user_id, created_by) VALUES (?, ?, ?)').run(to.id, userId, req.user.id);
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+    audit(req.user.id, 'assignment.move', { shift_id: to.id, from_shift_id: from.id, user_id: userId, von: from.unit_name, nach: to.unit_name, reason, force });
+    return loadShifts('s.id IN (?, ?)', [from.id, to.id]);
+  }));
+
   /** Protokoll der Ein- und Austragungen mit Begründung */
   app.get('/api/log', auth, manager, wrap((req) => {
     const limit = Math.min(Number(req.query.limit) || 200, 1000);
-    const rows = db.prepare(`SELECT * FROM audit_log WHERE action IN ('assignment.add','assignment.remove','absence.create','absence.decide',
-      'absence.update','absence.delete','attachment.upload','user.rights','user.create','unit.create','unit.update','unit.delete','building.create','building.update','building.delete') ORDER BY id DESC LIMIT ?`).all(limit);
+    const rows = db.prepare(`SELECT * FROM audit_log WHERE action IN ('assignment.add','assignment.remove','assignment.move','absence.create','absence.decide',
+      'absence.update','absence.delete','attachment.upload','user.rights','user.create','unit.create','unit.update','unit.delete','building.create','building.update','building.delete','verbund.create','verbund.update','verbund.delete') ORDER BY id DESC LIMIT ?`).all(limit);
     const userName = new Map(db.prepare('SELECT id, name FROM users').all().map((u) => [u.id, u.name]));
     const shiftInfo = db.prepare(`SELECT s.date, st.code, u.name AS unit_name FROM shifts s JOIN shift_types st ON st.id = s.shift_type_id
       JOIN units u ON u.id = s.unit_id WHERE s.id = ?`);
@@ -911,7 +1066,7 @@ function createApp(db, opts = {}) {
       const shift = d.shift_id ? shiftInfo.get(d.shift_id) : null;
       return {
         id: r.id, at: r.at, action: r.action, actor: userName.get(r.actor_id) || '–',
-        person: userName.get(d.user_id) || null, shift, reason: d.reason || d.note || '', details: d,
+        person: userName.get(d.user_id) || null, shift, reason: d.reason || d.note || (d.von ? `${d.von} → ${d.nach}` : ''), details: d,
       };
     });
   }));
@@ -1199,7 +1354,7 @@ function createApp(db, opts = {}) {
       };
     });
     const understaffed = userFilter ? [] : loadShifts('s.date BETWEEN ? AND ?', [from, to])
-      .filter((s) => s.assigned.length < s.min_staff || s.qual_missing.length)
+      .filter((s) => s.unterbesetzt)
       .map((s) => ({
         id: s.id, date: s.date, unit_name: s.unit_name, code: s.type_code, besetzt: s.assigned.length, min_staff: s.min_staff,
         fehlt: s.qual_missing.map((q) => `${q.need - q.have}× ${q.qualification}`).join(', '),

@@ -69,6 +69,8 @@ test('Ablauf: Plan erzeugen, eintragen, Regeln, Auswertung', async () => {
   assert.equal((await login(mgr, 'manager', 'manager123')).status, 200);
   assert.equal((await login(anna, 'abecker', 'demo123')).status, 200);
   assert.equal((await login(murat, 'myilmaz', 'demo123')).status, 200);
+  // Dieser Ablauf prüft einzelne Stationen ohne Verbund (Verbünde: eigener Test)
+  for (const v of (await mgr('GET', '/api/verbuende')).data) await mgr('DELETE', `/api/verbuende/${v.id}`);
 
   // Mitarbeitende dürfen nichts verwalten
   assert.equal((await anna('POST', '/api/shifts/generate', { from: future(10), to: future(12) })).status, 403);
@@ -402,4 +404,79 @@ test('Zusatzurlaub bei Schwerbehinderung (§ 208 SGB IX) und Sonderurlaub', asyn
   // Schwerbehinderung zurücknehmen setzt Zusatzurlaub auf 0
   r = await mgr('PUT', `/api/users/${juliaId}`, { schwerbehindert: false });
   assert.equal(r.data.zusatzurlaub_tage, 0);
+});
+
+test('Stationsverbund: gemeinsame Mindestbesetzung und gleitendes Umsetzen', async () => {
+  const mgr = client();
+  await login(mgr, 'manager', 'manager123');
+  const units = (await mgr('GET', '/api/units')).data;
+  const s1 = units.find((u) => u.name === 'Station 1'), s2 = units.find((u) => u.name === 'Station 2');
+  let r = await mgr('POST', '/api/verbuende', { name: 'Verbund Akut', unit_ids: [s1.id, s2.id] });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.stationen, 2);
+  const vid = r.data.id;
+
+  // Nachtdienst in 20 Tagen: je Station min 1, max 2; Qualifikationsregel entfernen, damit nur die Kopfzahl zählt
+  for (const q of (await mgr('GET', '/api/qual-rules')).data) await mgr('DELETE', `/api/qual-rules/${q.id}`);
+  const d = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
+  await mgr('POST', '/api/shifts/generate', { from: d, to: d });
+  const plan = (await mgr('GET', `/api/plan?from=${d}&to=${d}`)).data.shifts;
+  const n1 = plan.find((x) => x.type_code === 'N' && x.unit_id === s1.id);
+  const n2 = plan.find((x) => x.type_code === 'N' && x.unit_id === s2.id);
+  assert.ok(n1.verbund && n1.verbund.gemeinsam);
+  const users = (await mgr('GET', '/api/users')).data;
+  const id = (u) => users.find((x) => x.username === u).id;
+
+  // Station 2 hat 2 Personen, Station 1 keine → Station 1 im Verbund ausgeglichen
+  await mgr('POST', `/api/shifts/${n2.id}/assign`, { user_id: id('twagner') });
+  await mgr('POST', `/api/shifts/${n2.id}/assign`, { user_id: id('jschmitz') });
+  r = await mgr('GET', `/api/plan?from=${d}&to=${d}`);
+  let a = r.data.shifts.find((x) => x.id === n1.id);
+  assert.equal(a.assigned.length, 0);
+  assert.equal(a.verbund.besetzt, 2);
+  assert.equal(a.verbund.min, 2);
+  assert.equal(a.ausgeglichen, true);
+  assert.equal(a.unterbesetzt, false);
+  // Auswertung zählt ausgeglichene Schichten nicht als unterbesetzt
+  r = await mgr('GET', `/api/report?month=${d.slice(0, 7)}`);
+  assert.ok(!r.data.understaffed.some((x) => x.id === n1.id));
+
+  // Gleitendes Umsetzen: Verwaltung setzt eine Person von Station 2 auf Station 1 um
+  r = await mgr('POST', `/api/shifts/${n2.id}/move`, { user_id: id('jschmitz'), to_shift_id: n1.id, reason: 'Aufnahme auf Station 1' });
+  assert.equal(r.status, 200);
+  a = r.data.find((x) => x.id === n1.id);
+  assert.equal(a.assigned.length, 1);
+  assert.equal(a.ausgeglichen, false); // jetzt selbst gedeckt
+  // nur innerhalb des Verbunds und derselben Dienstart
+  const f1 = plan.find((x) => x.type_code === 'F' && x.unit_id === s1.id);
+  assert.equal((await mgr('POST', `/api/shifts/${n1.id}/move`, { user_id: id('jschmitz'), to_shift_id: f1.id })).data.code, 'KEIN_VERBUND');
+  // Protokoll
+  const log = (await mgr('GET', '/api/log')).data;
+  assert.equal(log[0].action, 'assignment.move');
+  assert.match(log[0].reason, /Aufnahme/);
+
+  // Mitarbeiterin wechselt selbst die Station im Verbund
+  const tobias = client();
+  await login(tobias, 'twagner', 'demo123');
+  r = await tobias('POST', `/api/shifts/${n2.id}/move`, { to_shift_id: n1.id });
+  assert.equal(r.status, 200);
+  // Austragen: gemeinsame Mindestbesetzung (2) bleibt nur mit beiden erfüllt
+  r = await tobias('DELETE', `/api/shifts/${n1.id}/assign`, { reason: 'Arzttermin' });
+  assert.equal(r.data.code, 'MINIMUM');
+  assert.match(r.data.error, /Verbund Akut/);
+
+  // Verbund ohne gemeinsame Mindestbesetzung: jede Station zählt einzeln
+  await mgr('PUT', `/api/verbuende/${vid}`, { gemeinsam: false });
+  await mgr('POST', `/api/shifts/${n1.id}/move`, { user_id: id('twagner'), to_shift_id: n2.id }); // zurück auf Station 2
+  r = await mgr('GET', `/api/plan?from=${d}&to=${d}`);
+  a = r.data.shifts.find((x) => x.id === n1.id);
+  assert.equal(a.verbund.gemeinsam, false);
+  assert.equal(a.unterbesetzt, false); // Julia ist auf Station 1
+  // Station 2 hat jetzt nur Tobias (min 1) → Wechsel von Tobias würde Station 2 leeren → gesperrt
+  r = await tobias('POST', `/api/shifts/${n2.id}/move`, { to_shift_id: n1.id });
+  assert.equal(r.data.code, 'MINIMUM');
+
+  // Verbund auflösen
+  await mgr('DELETE', `/api/verbuende/${vid}`);
+  assert.equal((await mgr('GET', '/api/units')).data.find((u) => u.id === s1.id).verbund_id, null);
 });
