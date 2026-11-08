@@ -1,6 +1,6 @@
 /* Service Worker: speichert nur die Programmdateien (App-Hülle), damit die App schnell startet.
    Dienstplan- und Personaldaten (/api/...) werden NIE zwischengespeichert. */
-const CACHE = 'pep-v5';
+const CACHE = 'pep-v6';
 const SHELL = ['./', 'index.html', 'app.js', 'style.css', 'icon.svg', 'manifest.webmanifest'];
 const API = new URL('api/', self.registration.scope).pathname;
 

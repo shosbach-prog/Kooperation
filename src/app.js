@@ -25,6 +25,42 @@ function createApp(db, opts = {}) {
   const cookiePath = base ? `${base}/` : '/';
   const app = express.Router();
   app.use(express.json({ limit: '1mb' }));
+  // ---------- Erscheinungsbild (öffentlich, schon vor der Anmeldung sichtbar) ----------
+  const LOGO_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg' };
+  const logoFile = () => {
+    const mime = getSettings().logo_mime;
+    return LOGO_TYPES[mime] ? { mime, file: path.join(uploadDir, `logo.${LOGO_TYPES[mime]}`) } : null;
+  };
+  const branding = () => {
+    const st = getSettings();
+    return { klinik_name: st.klinik_name, untertitel: st.untertitel, akzentfarbe: st.akzentfarbe, logo: !!logoFile(), logo_version: st.logo_version || 0 };
+  };
+  app.get('/api/branding', (_req, res) => res.json(branding()));
+  app.get('/api/branding/logo', (req, res, next) => {
+    const l = logoFile();
+    if (!l || !fs.existsSync(l.file)) return next(new HttpError(404, 'Kein Logo hinterlegt.'));
+    res.setHeader('Content-Type', l.mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    return res.sendFile(l.file);
+  });
+  // App-Manifest mit Klinikname (für „Zum Home-Bildschirm“)
+  app.get('/manifest.webmanifest', (_req, res) => {
+    const b = branding();
+    res.type('application/manifest+json').send(JSON.stringify({
+      name: `${b.untertitel} – ${b.klinik_name}`,
+      short_name: b.klinik_name.length <= 14 ? b.klinik_name : 'Dienstplan',
+      description: `${b.untertitel} der ${b.klinik_name}: Dienstplan, Urlaub und Krankmeldung`,
+      lang: 'de', start_url: './', scope: './', display: 'standalone',
+      background_color: '#f4f6f9', theme_color: b.akzentfarbe,
+      icons: [
+        { src: 'icon.svg', sizes: 'any', type: 'image/svg+xml' },
+        { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
+        { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
+        { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      ],
+    }, null, 2));
+  });
   app.use(express.static(path.join(__dirname, '..', 'public')));
 
   // ---------- Hilfsfunktionen ----------
@@ -248,7 +284,9 @@ function createApp(db, opts = {}) {
         if (!Array.isArray(v)) throw new HttpError(400, `Ungültige Liste für ${k}.`);
         v = [...new Set(v.map((x) => String(x).trim()).filter(Boolean))].slice(0, 100);
       }
-      if (typeof def === 'string' && !Array.isArray(def)) { v = String(v); if (k.startsWith('nacht_') && !isTime(v)) throw new HttpError(400, `Ungültige Uhrzeit für ${k}.`); }
+      if (k === 'akzentfarbe' && !/^#[0-9a-f]{6}$/i.test(String(v))) throw new HttpError(400, 'Farbe bitte als #RRGGBB angeben.');
+      if (k === 'klinik_name' && !String(v).trim()) throw new HttpError(400, 'Name der Einrichtung fehlt.');
+      if (typeof def === 'string' && !Array.isArray(def)) { v = String(v).trim().slice(0, 120); if (k.startsWith('nacht_') && !isTime(v)) throw new HttpError(400, `Ungültige Uhrzeit für ${k}.`); }
       upd.run(k, JSON.stringify(v));
     }
     audit(req.user.id, 'settings.update', req.body);
@@ -428,6 +466,30 @@ function createApp(db, opts = {}) {
     } catch (e) { db.exec('ROLLBACK'); throw e; }
     audit(req.user.id, 'shifts.generate', { from, to, unitIds, created });
     return { created };
+  }));
+
+  // ---------- Logo hochladen / entfernen (Manager) ----------
+  const setSetting = (k, v) => db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run(k, JSON.stringify(v));
+  app.post('/api/branding/logo', auth, manager, express.raw({ type: () => true, limit: 2 * 1024 * 1024 }), wrap((req) => {
+    const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    const mime = sniffMime(buf);
+    if (!LOGO_TYPES[mime]) throw new HttpError(400, 'Logo bitte als PNG oder JPG (max. 2 MB) hochladen.');
+    const old = logoFile();
+    if (old) fs.rmSync(old.file, { force: true });
+    fs.mkdirSync(uploadDir, { recursive: true });
+    fs.writeFileSync(path.join(uploadDir, `logo.${LOGO_TYPES[mime]}`), buf, { mode: 0o644 });
+    setSetting('logo_mime', mime);
+    setSetting('logo_version', Date.now());
+    audit(req.user.id, 'branding.logo', { mime, size: buf.length });
+    return branding();
+  }));
+  app.delete('/api/branding/logo', auth, manager, wrap((req) => {
+    const old = logoFile();
+    if (old) fs.rmSync(old.file, { force: true });
+    setSetting('logo_mime', '');
+    audit(req.user.id, 'branding.logo_delete', {});
+    return branding();
   }));
 
   // ---------- Mindestbesetzung nach Qualifikation ----------

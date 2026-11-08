@@ -73,11 +73,43 @@ function setMain(...nodes) {
   }
 }
 
+// ---------- Erscheinungsbild der Einrichtung ----------
+const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+async function loadBranding() {
+  try { state.branding = await api('GET', 'api/branding'); } catch { state.branding = state.branding || null; }
+  applyBranding();
+}
+function logoImg(cls) {
+  const b = state.branding;
+  return b && b.logo ? h('img', { src: `api/branding/logo?v=${b.logo_version}`, alt: `Logo ${b.klinik_name}`, class: cls }) : null;
+}
+function applyBranding() {
+  const b = state.branding;
+  if (!b) return;
+  document.title = `${b.untertitel} – ${b.klinik_name}`;
+  document.getElementById('clinic-name').textContent = b.klinik_name;
+  document.getElementById('brand-sub').textContent = b.untertitel;
+  document.getElementById('brand-mark').replaceChildren(logoImg('brand-logo') || h('span', { class: 'logo' }, '⊕'));
+  if (darkQuery.matches) document.documentElement.style.removeProperty('--primary');
+  else document.documentElement.style.setProperty('--primary', b.akzentfarbe);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', b.akzentfarbe);
+  const login = main().querySelector('.login-brand');
+  if (login) fillLoginBrand(login);
+}
+darkQuery.addEventListener('change', applyBranding);
+function fillLoginBrand(el) {
+  const b = state.branding || { klinik_name: '', untertitel: 'Personaleinsatzplanung' };
+  el.querySelector('[data-clinic]').textContent = b.klinik_name;
+  el.querySelector('[data-sub]').textContent = b.untertitel;
+  el.querySelector('[data-logo]').replaceChildren(logoImg('login-logo-img') || h('span', { class: 'login-logo-icon' }, '⊕'));
+}
+
 // ---------- Anmeldung ----------
 function renderLogin() {
   document.getElementById('topbar').hidden = true;
   const node = document.getElementById('login-tpl').content.cloneNode(true);
   setMain(node);
+  fillLoginBrand(main().querySelector('.login-brand'));
   const form = document.getElementById('login-form');
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
@@ -145,8 +177,7 @@ async function boot() {
     return;
   }
   document.getElementById('topbar').hidden = false;
-  document.getElementById('clinic-name').textContent = state.settings.klinik_name;
-  document.title = `Personaleinsatzplanung – ${state.settings.klinik_name}`;
+  applyBranding();
   document.getElementById('who').textContent = `${state.me.name} (${isMgr() ? 'Einsatzplanung' : 'Mitarbeiter/in'})`;
   state.weekStart = state.weekStart || mondayOf(todayIso());
   state.month = state.month || todayIso().slice(0, 7);
@@ -695,7 +726,9 @@ async function renderRequirements() {
 async function renderSettings() {
   const s = await api('GET', 'api/settings');
   const fields = [
-    ['klinik_name', 'Name der Einrichtung', 'text'],
+    ['klinik_name', 'Name der Einrichtung', 'text', 'Erscheint groß auf der Anmeldeseite, in der Kopfzeile und als Name der Handy-App.'],
+    ['untertitel', 'Bezeichnung der Anwendung', 'text', 'z. B. „Personaleinsatzplanung“ oder „Dienstplan Pflege“'],
+    ['akzentfarbe', 'Hausfarbe (Schaltflächen, Kopfzeile)', 'color'],
     ['zwei_faktor_pflicht', 'Zwei-Faktor-Anmeldung für alle verpflichtend', 'checkbox', 'Empfohlen. Ohne eingerichteten zweiten Faktor ist dann keine Anmeldung möglich.'],
     ['wochenstunden_standard', 'Regelmäßige Wochenarbeitszeit (Std.)', 'number', 'TVöD-K: 38,5 Std.'],
     ['austrag_frist_std', 'Austragen möglich bis … Std. vor Dienstbeginn', 'number'],
@@ -732,11 +765,38 @@ async function renderSettings() {
       el.dataset.kind === 'list' ? el.value.split('\n') : el.type === 'checkbox' ? el.checked : el.value]));
     try {
       state.settings = await api('PUT', 'api/settings', body);
-      document.getElementById('clinic-name').textContent = state.settings.klinik_name;
+      await loadBranding();
       toast('Einstellungen gespeichert.');
     } catch (e) { toast(e.message, true); }
   });
-  setMain(form);
+  setMain(form, logoCard());
+}
+
+function logoCard() {
+  const b = state.branding || {};
+  const input = h('input', { type: 'file', accept: 'image/png,image/jpeg', hidden: true });
+  input.addEventListener('change', async () => {
+    const file = input.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) return toast('Das Logo ist größer als 2 MB.', true);
+    try {
+      const res = await fetch('api/branding/logo', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast('Logo gespeichert.');
+      await loadBranding(); renderSettings();
+    } catch (e) { toast(e.message, true); }
+  });
+  return h('div', { class: 'card' }, h('h2', {}, 'Logo'),
+    h('p', { class: 'small muted' }, 'PNG oder JPG, max. 2 MB, am besten quer und mit transparentem Hintergrund. ',
+      'Erscheint auf der Anmeldeseite und in der Kopfzeile. Bitte nur ein Logo verwenden, dessen Nutzung die Einrichtung freigegeben hat.'),
+    b.logo ? h('div', { class: 'logo-preview' }, logoImg('login-logo-img')) : h('p', { class: 'muted' }, 'Kein Logo hinterlegt.'),
+    h('div', { class: 'toolbar' }, input,
+      h('button', { onclick: () => input.click() }, b.logo ? 'Anderes Logo hochladen' : 'Logo hochladen'),
+      b.logo ? h('button', { class: 'danger', onclick: async () => {
+        if (!confirm('Logo entfernen?')) return;
+        try { await api('DELETE', 'api/branding/logo'); await loadBranding(); renderSettings(); } catch (e) { toast(e.message, true); }
+      } }, 'Entfernen') : null));
 }
 
 // ---------- Urlaub & Krankheit ----------
@@ -1124,4 +1184,4 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
-boot();
+loadBranding().then(boot);

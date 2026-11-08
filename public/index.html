@@ -16,7 +16,8 @@
 </head>
 <body>
   <header id="topbar" hidden>
-    <div class="brand"><span class="logo">⊕</span> <span id="clinic-name">Personaleinsatzplanung</span></div>
+    <div class="brand"><span class="brand-mark" id="brand-mark"><span class="logo">⊕</span></span>
+      <span class="brand-text"><span id="clinic-name"></span><span class="brand-sub" id="brand-sub"></span></span></div>
     <nav id="tabs"></nav>
     <div class="who"><span id="who"></span> <button id="logout" class="ghost">Abmelden</button></div>
   </header>
@@ -26,14 +27,18 @@
 
   <template id="login-tpl">
     <section class="login card">
-      <h1>Personaleinsatzplanung</h1>
-      <p class="muted" data-clinic></p>
+      <div class="login-brand">
+        <div class="login-logo" data-logo></div>
+        <h1 data-clinic></h1>
+        <p class="login-sub" data-sub></p>
+      </div>
       <form id="login-form">
         <label>Benutzername <input name="username" autocomplete="username" required autofocus></label>
         <label>Passwort <input name="password" type="password" autocomplete="current-password" required></label>
         <button type="submit">Anmelden</button>
         <p class="error" id="login-error"></p>
       </form>
+      <p class="small muted login-foot">Zugang nur für Beschäftigte. Anmeldung mit Zwei-Faktor-Authentifizierung.</p>
     </section>
   </template>
 

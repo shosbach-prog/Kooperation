@@ -6,6 +6,8 @@ const { DatabaseSync } = require('node:sqlite');
 
 const DEFAULT_SETTINGS = {
   klinik_name: 'LWL-Klinik Dortmund',
+  untertitel: 'Personaleinsatzplanung',
+  akzentfarbe: '#1f6f8b',
   zwei_faktor_pflicht: true,
   wochenstunden_standard: 38.5,
   austrag_frist_std: 72,

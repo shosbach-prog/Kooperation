@@ -33,7 +33,21 @@ h3 { font-size: 1rem; margin: 1.25rem 0 .5rem; }
 
 #topbar[hidden] { display: none; }
 #topbar { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; padding: .6rem 1rem; background: var(--card); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
-.brand { font-weight: 700; display: flex; align-items: center; gap: .4rem; }
+.brand { font-weight: 700; display: flex; align-items: center; gap: .5rem; }
+.brand-mark { display: flex; align-items: center; }
+.brand-logo { height: 32px; max-width: 120px; object-fit: contain; display: block; }
+.brand-text { display: flex; flex-direction: column; line-height: 1.15; }
+.brand-sub { font-size: .75rem; font-weight: 500; color: var(--muted); }
+.login-brand { text-align: center; margin-bottom: .5rem; }
+.login-brand h1 { font-size: 1.5rem; margin: .5rem 0 .15rem; }
+.login-sub { margin: 0; color: var(--primary); font-weight: 600; letter-spacing: .02em; }
+.login-logo { display: flex; justify-content: center; }
+.login-logo-img { max-height: 72px; max-width: 240px; object-fit: contain; }
+.login-logo-icon { font-size: 2.6rem; color: var(--primary); line-height: 1; }
+.login { border-top: 5px solid var(--primary); }
+.login-foot { text-align: center; margin: .75rem 0 0; }
+.logo-preview { padding: .75rem; background: #fff; border: 1px solid var(--line); border-radius: 6px; display: inline-block; margin-bottom: .5rem; }
+input[type="color"] { width: 4em; height: 2.4em; padding: 2px; }
 .logo { color: var(--primary); font-size: 1.3rem; }
 #tabs { display: flex; gap: .25rem; flex-wrap: wrap; flex: 1; }
 #tabs button { background: transparent; color: var(--text); border: 0; padding: .4rem .7rem; border-radius: var(--radius); }
