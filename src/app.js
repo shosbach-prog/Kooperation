@@ -3,7 +3,9 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 const { hashPassword, verifyPassword, DEFAULT_SETTINGS } = require('./db');
+const QRCode = require('qrcode');
 const T = require('./tvoed');
+const TOTP = require('./totp');
 
 const SESSION_HOURS = 12;
 
@@ -52,34 +54,164 @@ function createApp(db) {
     } catch (e) { next(e); }
   };
 
-  // ---------- Authentifizierung ----------
+  // ---------- Authentifizierung (Passwort + Zwei-Faktor) ----------
+  const MAX_FAILS = 5;
+  const LOCK_MIN = 15;
+  const PENDING_MIN = 10;
+
   app.use((req, _res, next) => {
     const token = parseCookies(req).sid;
     if (token) {
-      const row = db.prepare(`SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
+      const row = db.prepare(`SELECT u.*, s.stage AS session_stage FROM sessions s JOIN users u ON u.id = s.user_id
         WHERE s.token = ? AND s.expires > ? AND u.active = 1`).get(token, Date.now());
-      if (row) { req.user = row; req.token = token; }
+      if (row) {
+        req.token = token;
+        if (row.session_stage === 'full') req.user = row;
+        else req.pending = row;
+      }
     }
     next();
   });
 
-  const auth = (req, _res, next) => (req.user ? next() : next(new HttpError(401, 'Bitte anmelden.')));
+  const auth = (req, _res, next) => {
+    if (req.user) return next();
+    if (req.pending) {
+      return next(new HttpError(401, 'Bitte die Anmeldung mit dem zweiten Faktor abschließen.',
+        req.pending.session_stage === 'setup' ? 'STAGE_SETUP' : 'STAGE_2FA'));
+    }
+    return next(new HttpError(401, 'Bitte anmelden.'));
+  };
   const manager = (req, _res, next) => (req.user?.role === 'manager' ? next() : next(new HttpError(403, 'Nur für die Einsatzplanung (Manager).')));
 
   const publicUser = (u) => ({
     id: u.id, name: u.name, username: u.username, role: u.role, qualification: u.qualification,
     weekly_hours: u.weekly_hours, min_hours_month: u.min_hours_month, stundenentgelt: u.stundenentgelt, active: !!u.active,
+    totp_enabled: !!u.totp_enabled, locked: u.locked_until > Date.now(), recovery_left: JSON.parse(u.recovery_codes || '[]').length,
   });
+
+  const startSession = (res, userId, stage) => {
+    const token = crypto.randomBytes(32).toString('hex');
+    const ttl = stage === 'full' ? SESSION_HOURS * 3600e3 : PENDING_MIN * 60e3;
+    db.prepare('DELETE FROM sessions WHERE expires < ?').run(Date.now());
+    db.prepare('INSERT INTO sessions (token, user_id, expires, stage) VALUES (?, ?, ?, ?)').run(token, userId, Date.now() + ttl, stage);
+    res.setHeader('Set-Cookie', `sid=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.round(ttl / 1000)}${secureFlag}`);
+    return token;
+  };
+  const secureFlag = process.env.COOKIE_SECURE === '1' ? '; Secure' : '';
+
+  const checkLock = (u) => {
+    if (u.locked_until > Date.now()) {
+      const min = Math.ceil((u.locked_until - Date.now()) / 60000);
+      throw new HttpError(429, `Zu viele Fehlversuche. Das Konto ist für ${min} Min. gesperrt.`, 'GESPERRT');
+    }
+  };
+  const registerFail = (u) => {
+    const fails = u.failed_logins + 1;
+    if (fails >= MAX_FAILS) {
+      db.prepare('UPDATE users SET failed_logins = 0, locked_until = ? WHERE id = ?').run(Date.now() + LOCK_MIN * 60e3, u.id);
+      audit(null, 'login.locked', { user_id: u.id });
+    } else {
+      db.prepare('UPDATE users SET failed_logins = ? WHERE id = ?').run(fails, u.id);
+    }
+  };
+  const resetFails = (id) => db.prepare('UPDATE users SET failed_logins = 0, locked_until = 0 WHERE id = ?').run(id);
 
   app.post('/api/login', wrap((req, res) => {
     const { username, password } = req.body || {};
     const u = db.prepare('SELECT * FROM users WHERE username = ? AND active = 1').get(String(username || '').trim().toLowerCase());
-    if (!u || !verifyPassword(password, u.password_hash)) throw new HttpError(401, 'Benutzername oder Passwort falsch.');
-    const token = crypto.randomBytes(32).toString('hex');
-    db.prepare('DELETE FROM sessions WHERE expires < ?').run(Date.now());
-    db.prepare('INSERT INTO sessions (token, user_id, expires) VALUES (?, ?, ?)').run(token, u.id, Date.now() + SESSION_HOURS * 3600e3);
-    res.setHeader('Set-Cookie', `sid=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_HOURS * 3600}`);
-    return { user: publicUser(u) };
+    if (u) checkLock(u);
+    if (!u || !verifyPassword(password, u.password_hash)) {
+      if (u) registerFail(u);
+      throw new HttpError(401, 'Benutzername oder Passwort falsch.');
+    }
+    if (req.token) db.prepare('DELETE FROM sessions WHERE token = ?').run(req.token);
+    const stage = u.totp_enabled ? '2fa' : (getSettings().zwei_faktor_pflicht ? 'setup' : 'full');
+    if (stage === 'full') resetFails(u.id);
+    startSession(res, u.id, stage);
+    return stage === 'full' ? { stage, user: publicUser(u) } : { stage, name: u.name };
+  }));
+
+  /** Zweiter Schritt: Code aus der Authenticator-App oder Wiederherstellungscode */
+  app.post('/api/login/2fa', wrap((req, res) => {
+    const u = req.pending;
+    if (!u || u.session_stage !== '2fa') throw new HttpError(401, 'Die Anmeldung ist abgelaufen. Bitte erneut anmelden.');
+    checkLock(u);
+    const code = String(req.body?.code || '').trim();
+    let ok = false, usedRecovery = false;
+    const counter = TOTP.verify(u.totp_secret, code, u.totp_last_counter);
+    if (counter !== null) {
+      db.prepare('UPDATE users SET totp_last_counter = ? WHERE id = ?').run(counter, u.id);
+      ok = true;
+    } else if (/^[0-9a-f]{5}-?[0-9a-f]{5}$/i.test(code)) {
+      const norm = code.includes('-') ? code : `${code.slice(0, 5)}-${code.slice(5)}`;
+      const hashes = JSON.parse(u.recovery_codes || '[]');
+      const idx = hashes.indexOf(TOTP.hashRecovery(norm));
+      if (idx >= 0) {
+        hashes.splice(idx, 1);
+        db.prepare('UPDATE users SET recovery_codes = ? WHERE id = ?').run(JSON.stringify(hashes), u.id);
+        ok = true; usedRecovery = true;
+        audit(u.id, 'login.recovery_code', { left: hashes.length });
+      }
+    }
+    if (!ok) {
+      registerFail(u);
+      throw new HttpError(401, 'Der Code ist ungültig oder abgelaufen.', 'CODE');
+    }
+    resetFails(u.id);
+    db.prepare('DELETE FROM sessions WHERE token = ?').run(req.token);
+    startSession(res, u.id, 'full');
+    const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(u.id);
+    return { stage: 'full', user: publicUser(fresh), used_recovery: usedRecovery };
+  }));
+
+  /** Einrichtung: neues Geheimnis erzeugen und als QR-Code liefern */
+  app.post('/api/2fa/setup', async (req, res, next) => {
+    try {
+      const u = req.user || (req.pending?.session_stage === 'setup' ? req.pending : null);
+      if (!u) throw new HttpError(401, 'Bitte anmelden.');
+      const secret = TOTP.generateSecret();
+      db.prepare('UPDATE users SET totp_pending = ? WHERE id = ?').run(secret, u.id);
+      const uri = TOTP.otpauthUri(secret, u.username, getSettings().klinik_name || 'Personaleinsatzplanung');
+      const qr = await QRCode.toDataURL(uri, { margin: 1, width: 220 });
+      res.json({ secret: secret.replace(/(.{4})/g, '$1 ').trim(), uri, qr });
+    } catch (e) { next(e); }
+  });
+
+  /** Einrichtung abschließen: ersten Code prüfen, Wiederherstellungscodes ausgeben */
+  app.post('/api/2fa/enable', wrap((req, res) => {
+    const u = req.user || (req.pending?.session_stage === 'setup' ? req.pending : null);
+    if (!u) throw new HttpError(401, 'Bitte anmelden.');
+    if (!u.totp_pending) throw new HttpError(400, 'Bitte die Einrichtung neu starten.');
+    const counter = TOTP.verify(u.totp_pending, req.body?.code);
+    if (counter === null) throw new HttpError(400, 'Der Code stimmt nicht. Bitte die Uhrzeit des Handys prüfen und den aktuellen Code eingeben.', 'CODE');
+    const codes = TOTP.recoveryCodes();
+    db.prepare(`UPDATE users SET totp_secret = totp_pending, totp_pending = NULL, totp_enabled = 1, totp_last_counter = ?,
+      recovery_codes = ? WHERE id = ?`).run(counter, JSON.stringify(codes.map(TOTP.hashRecovery)), u.id);
+    audit(u.id, '2fa.enable', {});
+    if (!req.user) {
+      db.prepare('DELETE FROM sessions WHERE token = ?').run(req.token);
+      resetFails(u.id);
+      startSession(res, u.id, 'full');
+    }
+    return { recovery_codes: codes, user: publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(u.id)) };
+  }));
+
+  app.post('/api/2fa/recovery-codes', auth, wrap((req) => {
+    const counter = TOTP.verify(req.user.totp_secret, req.body?.code, req.user.totp_last_counter);
+    if (!req.user.totp_enabled || counter === null) throw new HttpError(400, 'Der Code ist ungültig.', 'CODE');
+    const codes = TOTP.recoveryCodes();
+    db.prepare('UPDATE users SET recovery_codes = ?, totp_last_counter = ? WHERE id = ?').run(JSON.stringify(codes.map(TOTP.hashRecovery)), counter, req.user.id);
+    audit(req.user.id, '2fa.recovery_regenerated', {});
+    return { recovery_codes: codes };
+  }));
+
+  app.post('/api/2fa/disable', auth, wrap((req) => {
+    if (getSettings().zwei_faktor_pflicht) throw new HttpError(400, 'Die Zwei-Faktor-Anmeldung ist in dieser Einrichtung Pflicht.');
+    const counter = TOTP.verify(req.user.totp_secret, req.body?.code, req.user.totp_last_counter);
+    if (!req.user.totp_enabled || counter === null) throw new HttpError(400, 'Der Code ist ungültig.', 'CODE');
+    db.prepare("UPDATE users SET totp_secret = NULL, totp_pending = NULL, totp_enabled = 0, recovery_codes = '[]' WHERE id = ?").run(req.user.id);
+    audit(req.user.id, '2fa.disable', {});
+    return { ok: true };
   }));
 
   app.post('/api/logout', wrap((req, res) => {
@@ -161,7 +293,13 @@ function createApp(db) {
       db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
     }
     if (f.active === 0) db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
-    audit(req.user.id, 'user.update', { id, fields: keys, password: !!req.body.password });
+    if (req.body.reset_2fa) {
+      db.prepare(`UPDATE users SET totp_secret = NULL, totp_pending = NULL, totp_enabled = 0, totp_last_counter = -1,
+        recovery_codes = '[]', failed_logins = 0, locked_until = 0 WHERE id = ?`).run(id);
+      db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
+    }
+    if (req.body.unlock) db.prepare('UPDATE users SET failed_logins = 0, locked_until = 0 WHERE id = ?').run(id);
+    audit(req.user.id, 'user.update', { id, fields: keys, password: !!req.body.password, reset_2fa: !!req.body.reset_2fa });
     return publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id));
   }));
 

@@ -5,7 +5,8 @@ const crypto = require('crypto');
 const { DatabaseSync } = require('node:sqlite');
 
 const DEFAULT_SETTINGS = {
-  klinik_name: 'KWL Klinik Dortmund',
+  klinik_name: 'LWL-Klinik Dortmund',
+  zwei_faktor_pflicht: true,
   wochenstunden_standard: 38.5,
   austrag_frist_std: 72,
   austrag_unter_minimum: false,
@@ -47,13 +48,21 @@ CREATE TABLE IF NOT EXISTS users (
   weekly_hours REAL DEFAULT 38.5,
   min_hours_month REAL DEFAULT 0,
   stundenentgelt REAL DEFAULT 0,
-  active INTEGER NOT NULL DEFAULT 1
+  active INTEGER NOT NULL DEFAULT 1,
+  totp_secret TEXT,
+  totp_pending TEXT,
+  totp_enabled INTEGER NOT NULL DEFAULT 0,
+  totp_last_counter INTEGER NOT NULL DEFAULT -1,
+  recovery_codes TEXT NOT NULL DEFAULT '[]',
+  failed_logins INTEGER NOT NULL DEFAULT 0,
+  locked_until INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
   token TEXT PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  expires INTEGER NOT NULL
+  expires INTEGER NOT NULL,
+  stage TEXT NOT NULL DEFAULT 'full'
 );
 
 CREATE TABLE IF NOT EXISTS units (
@@ -158,11 +167,32 @@ function seed(db, withDemo) {
   }
 }
 
+/** Ergänzt fehlende Spalten in älteren Datenbanken */
+function migrate(db) {
+  const cols = (t) => db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
+  const add = (table, def) => {
+    const name = def.split(' ')[0];
+    if (!cols(table).includes(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${def}`);
+  };
+  add('users', 'totp_secret TEXT');
+  add('users', 'totp_pending TEXT');
+  add('users', 'totp_enabled INTEGER NOT NULL DEFAULT 0');
+  add('users', 'totp_last_counter INTEGER NOT NULL DEFAULT -1');
+  add('users', "recovery_codes TEXT NOT NULL DEFAULT '[]'");
+  add('users', 'failed_logins INTEGER NOT NULL DEFAULT 0');
+  add('users', 'locked_until INTEGER NOT NULL DEFAULT 0');
+  add('sessions', "stage TEXT NOT NULL DEFAULT 'full'");
+  // Name der Einrichtung aus der ersten Prototyp-Version korrigieren
+  db.prepare("UPDATE settings SET value = ? WHERE key = 'klinik_name' AND value = ?")
+    .run(JSON.stringify('LWL-Klinik Dortmund'), JSON.stringify('KWL Klinik Dortmund'));
+}
+
 function openDb(file) {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
   db.exec(SCHEMA);
+  migrate(db);
   seed(db, process.env.SEED_DEMO !== '0');
   return db;
 }

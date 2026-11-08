@@ -1,4 +1,4 @@
-# Personaleinsatzplanung – Prototyp für die KWL Klinik Dortmund
+# Personaleinsatzplanung – Prototyp für die LWL-Klinik Dortmund
 
 Webanwendung zur Dienst- und Einsatzplanung im Mehrschichtbetrieb. Die
 Arbeitszeit wird angelehnt an den **TVöD (BT-K)** angerechnet.
@@ -22,6 +22,16 @@ Arbeitszeit wird angelehnt an den **TVöD (BT-K)** angerechnet.
 - Austragen ist nur bis zur eingestellten Frist möglich (Standard: 72 Std. vor Dienstbeginn) und nur, wenn die Mindestbesetzung nicht unterschritten wird
 - **Meine Dienste:** Übersicht der kommenden Dienste
 - **Stundenkonto:** Soll/Ist, Fortschritt zur Mindestverfügbarkeit, Zuschläge
+
+**Anmeldung mit Zwei-Faktor-Authentifizierung (2FA)**
+- Anmeldung mit Passwort **und** einem 6-stelligen Code aus einer Authenticator-App (TOTP nach RFC 6238), z. B. Microsoft Authenticator, Google Authenticator oder FreeOTP
+- Bei der ersten Anmeldung wird die App per **QR-Code** eingerichtet; als Ersatz gibt es einen Schlüssel zum Abtippen
+- 10 **Wiederherstellungscodes**, falls das Handy verloren geht; jeder Code gilt nur einmal
+- 2FA ist standardmäßig **Pflicht für alle** (abschaltbar unter Einstellungen)
+- **Sperre** für 15 Minuten nach 5 Fehlversuchen (Passwort oder Code)
+- Ein bereits benutzter Code wird kein zweites Mal angenommen
+- Die Einsatzplanung kann bei Handyverlust die **2FA zurücksetzen** und gesperrte Konten **entsperren**
+- Unter **Sicherheit**: Passwort ändern, neues Handy einrichten, neue Wiederherstellungscodes erzeugen
 
 **Automatische Prüfungen**
 - Keine Überschneidung von Diensten
@@ -68,7 +78,17 @@ Danach im Browser **http://localhost:3000** öffnen.
 | Einsatzplanung (Manager) | `manager` | `manager123` |
 | Mitarbeiter/in | `abecker`, `myilmaz`, `jschmitz`, `twagner`, `lhoffmann`, `kschulz` | `demo123` |
 
+Bei der ersten Anmeldung jedes Kontos wird die Einrichtung der 2FA verlangt.
+Halten Sie dafür ein Handy mit Authenticator-App bereit.
+
 Die Passwörter bitte **vor jedem echten Einsatz ändern**.
+
+### Betrieb im Kliniknetz
+
+- Die Anwendung **nur über HTTPS** bereitstellen, z. B. hinter dem vorhandenen Reverse-Proxy, und dann `COOKIE_SECURE=1` setzen.
+- Die Uhrzeit des Servers muss stimmen (NTP), sonst werden die 2FA-Codes abgelehnt.
+- Die Datenbankdatei (`data/`) enthält Personaldaten. Sie gehört in die Datensicherung und muss vor fremdem Zugriff geschützt werden.
+- Vor dem Echtbetrieb Datenschutzbeauftragte/n und Personalrat einbinden (Dienstplanung ist mitbestimmungspflichtig).
 
 ### Konfiguration (Umgebungsvariablen)
 
@@ -77,6 +97,7 @@ Die Passwörter bitte **vor jedem echten Einsatz ändern**.
 | `PORT` | HTTP-Port | `3000` |
 | `DB_FILE` | Pfad der SQLite-Datenbank | `data/personaleinsatz.db` |
 | `MANAGER_PASSWORD` | Startpasswort des Managers bei der ersten Einrichtung | `manager123` |
+| `COOKIE_SECURE` | `1` = Anmelde-Cookie nur über HTTPS senden (im Echtbetrieb setzen) | `0` |
 | `SEED_DEMO` | `0` = ohne Demo-Stationen, Demo-Dienste und Demo-Personal starten | `1` |
 
 ### Tests
@@ -99,6 +120,7 @@ npm test
 server.js          Startpunkt
 src/app.js         REST-API (Express), Berechtigungen, Planungsregeln
 src/db.js          SQLite-Schema, Startdaten, Passwort-Hashing (scrypt)
+src/totp.js        Einmalcodes für die Zwei-Faktor-Anmeldung (RFC 6238)
 src/tvoed.js       Feiertage NRW, Soll-Stunden, Zuschlagsberechnung
 public/            Oberfläche (HTML/CSS/JavaScript, ohne Build-Schritt)
 test/              Tests (node:test)
@@ -112,4 +134,4 @@ test/              Tests (node:test)
 - Benachrichtigung per E-Mail bei offenen Schichten
 - Wechselschicht- und Schichtzulage (§ 8 Abs. 5/6), Bereitschaftsdienst, Rufbereitschaft
 - Anbindung an das Zeiterfassungs- oder Lohnsystem (z. B. als Export)
-- Anmeldung über das Klinik-Verzeichnis (Single Sign-on)
+- Anmeldung über das Klinik-Verzeichnis (Single Sign-on, z. B. Active Directory / Entra ID)

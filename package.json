@@ -21,7 +21,8 @@
   },
   "homepage": "https://github.com/shosbach-prog/kooperation#readme",
   "dependencies": {
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "qrcode": "^1.5.4"
   },
   "private": true,
   "engines": {

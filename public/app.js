@@ -32,7 +32,8 @@ async function api(method, url, body) {
   const isJson = (res.headers.get('content-type') || '').includes('json');
   const data = isJson ? await res.json() : await res.text();
   if (!res.ok) {
-    if (res.status === 401 && url !== '/api/login') { state.me = null; renderLogin(); }
+    const authUrl = url.startsWith('/api/login') || url.startsWith('/api/2fa') || url === '/api/me';
+    if (res.status === 401 && !authUrl) { state.me = null; renderLogin(); }
     const e = new Error((data && data.error) || res.statusText);
     e.code = data && data.code; e.status = res.status;
     throw e;
@@ -72,8 +73,10 @@ function renderLogin() {
     ev.preventDefault();
     const fd = new FormData(form);
     try {
-      await api('POST', '/api/login', { username: fd.get('username'), password: fd.get('password') });
-      await boot();
+      const r = await api('POST', '/api/login', { username: fd.get('username'), password: fd.get('password') });
+      if (r.stage === '2fa') renderCodeStep();
+      else if (r.stage === 'setup') renderSetup(false);
+      else await boot();
     } catch (e) { document.getElementById('login-error').textContent = e.message; }
   });
 }
@@ -89,7 +92,7 @@ const VIEWS = {
   req: { label: 'Mindestbesetzung', render: renderRequirements, mgr: true },
   report: { label: 'Auswertung TVöD', render: renderReport, mgr: true },
   settings: { label: 'Einstellungen', render: renderSettings, mgr: true },
-  account: { label: 'Passwort', render: renderAccount },
+  account: { label: 'Sicherheit', render: renderAccount },
 };
 
 function renderTabs() {
@@ -111,7 +114,12 @@ async function boot() {
   try {
     const { user, settings } = await api('GET', '/api/me');
     state.me = user; state.settings = settings;
-  } catch { renderLogin(); return; }
+  } catch (e) {
+    if (e.code === 'STAGE_2FA') renderCodeStep();
+    else if (e.code === 'STAGE_SETUP') renderSetup(false);
+    else renderLogin();
+    return;
+  }
   document.getElementById('topbar').hidden = false;
   document.getElementById('clinic-name').textContent = state.settings.klinik_name;
   document.title = `Personaleinsatzplanung – ${state.settings.klinik_name}`;
@@ -382,13 +390,24 @@ async function renderStaff() {
   setMain(
     h('div', { class: 'card' }, h('h2', {}, 'Mitarbeitende'),
       h('div', { class: 'table-wrap' }, h('table', {},
-        h('thead', {}, h('tr', {}, ['Name', 'Benutzer', 'Rolle', 'Qualifikation', 'Wochenstd.', 'Mindest-Std./Monat', 'Stundenentgelt €', 'Status', ''].map((x) => h('th', {}, x)))),
+        h('thead', {}, h('tr', {}, ['Name', 'Benutzer', 'Rolle', 'Qualifikation', 'Wochenstd.', 'Mindest-Std./Monat', 'Stundenentgelt €', 'Status', '2FA', ''].map((x) => h('th', {}, x)))),
         h('tbody', {}, users.map((u) => h('tr', { class: u.active ? '' : 'inactive' },
           h('td', {}, u.name), h('td', {}, u.username), h('td', {}, u.role === 'manager' ? 'Einsatzplanung' : 'Mitarbeiter/in'),
           h('td', {}, u.qualification), h('td', { class: 'num' }, fmtNum(u.weekly_hours)), h('td', { class: 'num' }, fmtNum(u.min_hours_month, 1)),
-          h('td', { class: 'num' }, fmtNum(u.stundenentgelt)), h('td', {}, u.active ? 'aktiv' : 'inaktiv'),
-          h('td', {}, h('button', { class: 'tiny ghost', onclick: () => main().querySelector('#staff-form').replaceWith(staffForm(u)) }, 'Bearbeiten')))))))),
+          h('td', { class: 'num' }, fmtNum(u.stundenentgelt)), h('td', {}, u.active ? 'aktiv' : 'inaktiv',
+            u.locked ? h('div', {}, h('span', { class: 'badge bad' }, 'gesperrt')) : null),
+          h('td', {}, u.totp_enabled ? h('span', { class: 'badge ok' }, 'eingerichtet') : h('span', { class: 'badge warn' }, 'offen')),
+          h('td', { class: 'actions' },
+            h('button', { class: 'tiny ghost', onclick: () => main().querySelector('#staff-form').replaceWith(staffForm(u)) }, 'Bearbeiten'),
+            u.totp_enabled ? h('button', { class: 'tiny danger', title: 'z. B. bei Verlust des Handys', onclick: () => userAction(u, { reset_2fa: true },
+              `2FA von ${u.name} zurücksetzen? Die Person muss den zweiten Faktor bei der nächsten Anmeldung neu einrichten.`) }, '2FA zurücksetzen') : null,
+            u.locked ? h('button', { class: 'tiny ghost', onclick: () => userAction(u, { unlock: true }) }, 'Entsperren') : null))))))),
     form);
+}
+
+async function userAction(u, body, question) {
+  if (question && !confirm(question)) return;
+  try { await api('PUT', `/api/users/${u.id}`, body); toast('Erledigt.'); renderStaff(); } catch (e) { toast(e.message, true); }
 }
 
 function staffForm(u) {
@@ -521,6 +540,7 @@ async function renderSettings() {
   const s = await api('GET', '/api/settings');
   const fields = [
     ['klinik_name', 'Name der Einrichtung', 'text'],
+    ['zwei_faktor_pflicht', 'Zwei-Faktor-Anmeldung für alle verpflichtend', 'checkbox', 'Empfohlen. Ohne eingerichteten zweiten Faktor ist dann keine Anmeldung möglich.'],
     ['wochenstunden_standard', 'Regelmäßige Wochenarbeitszeit (Std.)', 'number', 'TVöD-K: 38,5 Std.'],
     ['austrag_frist_std', 'Austragen möglich bis … Std. vor Dienstbeginn', 'number'],
     ['austrag_unter_minimum', 'Austragen auch unter Mindestbesetzung erlauben', 'checkbox'],
@@ -554,9 +574,106 @@ async function renderSettings() {
   setMain(form);
 }
 
-// ---------- Passwort ----------
-function renderAccount() {
-  const form = h('form', { class: 'card', style: { maxWidth: '420px' } }, h('h2', {}, 'Passwort ändern'),
+// ---------- Zwei-Faktor-Anmeldung ----------
+function authShell(...children) {
+  document.getElementById('topbar').hidden = true;
+  setMain(h('section', { class: 'login card' }, children));
+}
+
+async function cancelLogin() {
+  await api('POST', '/api/logout').catch(() => {});
+  renderLogin();
+}
+
+function renderCodeStep() {
+  const input = h('input', { name: 'code', inputmode: 'numeric', autocomplete: 'one-time-code', required: true, autofocus: true,
+    placeholder: '123456', maxlength: 11, class: 'code-input' });
+  const err = h('p', { class: 'error' });
+  const form = h('form', {},
+    h('label', {}, 'Code aus der Authenticator-App', input),
+    h('button', { type: 'submit' }, 'Bestätigen'), err);
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    try {
+      const r = await api('POST', '/api/login/2fa', { code: input.value });
+      if (r.used_recovery) {
+        alert(`Sie haben sich mit einem Wiederherstellungscode angemeldet. Noch ${r.user.recovery_left} Codes übrig.\n\n`
+          + 'Bitte richten Sie unter „Sicherheit“ neue Codes ein oder lassen Sie die 2FA von der Einsatzplanung zurücksetzen.');
+      }
+      await boot();
+    } catch (e) {
+      err.textContent = e.message;
+      input.select();
+      if (e.status === 401 && e.code !== 'CODE') setTimeout(renderLogin, 1500);
+    }
+  });
+  authShell(h('h1', {}, 'Zwei-Faktor-Anmeldung'),
+    h('p', { class: 'muted' }, 'Öffnen Sie Ihre Authenticator-App und geben Sie den 6-stelligen Code ein.'),
+    form,
+    h('details', {}, h('summary', { class: 'small' }, 'Kein Zugriff auf das Handy?'),
+      h('p', { class: 'small muted' }, 'Geben Sie oben einen Ihrer Wiederherstellungscodes ein (Format xxxxx-xxxxx). ',
+        'Jeder Code funktioniert nur einmal. Ohne Codes kann die Einsatzplanung Ihre 2FA zurücksetzen.')),
+    h('p', {}, h('button', { class: 'ghost', type: 'button', onclick: cancelLogin }, 'Abbrechen')));
+  input.focus();
+}
+
+/** Einrichtung des zweiten Faktors – bei der ersten Anmeldung (inApp=false) oder unter „Sicherheit“ */
+async function renderSetup(inApp) {
+  let data;
+  try { data = await api('POST', '/api/2fa/setup'); } catch (e) { if (!inApp) renderLogin(); else toast(e.message, true); return; }
+  const input = h('input', { inputmode: 'numeric', autocomplete: 'one-time-code', required: true, placeholder: '123456', maxlength: 6, class: 'code-input' });
+  const err = h('p', { class: 'error' });
+  const form = h('form', {}, h('label', {}, '3. Angezeigten Code eingeben', input), h('button', { type: 'submit' }, 'Aktivieren'), err);
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    try {
+      const r = await api('POST', '/api/2fa/enable', { code: input.value });
+      showRecoveryCodes(r.recovery_codes, inApp ? () => go('account') : boot);
+    } catch (e) { err.textContent = e.message; input.select(); }
+  });
+  const content = [
+    h('h1', {}, 'Zwei-Faktor-Anmeldung einrichten'),
+    !inApp ? h('p', { class: 'muted' }, 'Zum Schutz der Dienstplan- und Personaldaten ist ein zweiter Faktor vorgeschrieben. Die Einrichtung dauert etwa eine Minute.') : null,
+    h('ol', { class: 'steps' },
+      h('li', {}, 'Installieren Sie eine Authenticator-App auf Ihrem Handy, z. B. ', h('strong', {}, 'Microsoft Authenticator'), ', ',
+        h('strong', {}, 'Google Authenticator'), ' oder ', h('strong', {}, 'FreeOTP'), '.'),
+      h('li', {}, 'Scannen Sie in der App diesen QR-Code:',
+        h('div', { class: 'qr' }, h('img', { src: data.qr, alt: 'QR-Code für die Authenticator-App', width: 220, height: 220 })),
+        h('details', {}, h('summary', { class: 'small' }, 'QR-Code lässt sich nicht scannen?'),
+          h('p', { class: 'small' }, 'Schlüssel manuell eingeben (zeitbasiert, 6 Stellen):'), h('code', { class: 'secret' }, data.secret)))),
+    form,
+    h('p', {}, h('button', { class: 'ghost', type: 'button', onclick: inApp ? () => go('account') : cancelLogin }, 'Abbrechen')),
+  ];
+  if (inApp) setMain(h('section', { class: 'card', style: { maxWidth: '480px' } }, content));
+  else authShell(content);
+  input.focus();
+}
+
+function showRecoveryCodes(codes, onDone) {
+  const confirmBox = h('input', { type: 'checkbox' });
+  const done = h('button', { disabled: true, onclick: onDone }, 'Weiter');
+  confirmBox.addEventListener('change', () => { done.disabled = !confirmBox.checked; });
+  const text = codes.join('\n');
+  const content = [
+    h('h1', {}, 'Wiederherstellungscodes'),
+    h('p', {}, 'Falls Sie Ihr Handy verlieren, können Sie sich mit einem dieser Codes anmelden. ',
+      h('strong', {}, 'Jeder Code gilt nur einmal und wird nur jetzt angezeigt.')),
+    h('pre', { class: 'codes' }, text),
+    h('div', { class: 'toolbar' },
+      h('button', { class: 'ghost', type: 'button', onclick: () => navigator.clipboard.writeText(text).then(() => toast('Kopiert.'), () => toast('Kopieren nicht möglich.', true)) }, 'Kopieren'),
+      h('button', { class: 'ghost', type: 'button', onclick: () => window.print() }, 'Drucken')),
+    h('label', { class: 'check' }, confirmBox, 'Ich habe die Codes sicher aufbewahrt (nicht auf dem Handy mit der App).'),
+    h('p', {}, done),
+  ];
+  if (state.me) setMain(h('section', { class: 'card', style: { maxWidth: '480px' } }, content));
+  else authShell(content);
+}
+
+// ---------- Sicherheit: Passwort und 2FA ----------
+async function renderAccount() {
+  const { user, settings } = await api('GET', '/api/me');
+  state.me = user; state.settings = settings;
+  const form = h('form', { class: 'card', style: { maxWidth: '480px' } }, h('h2', {}, 'Passwort ändern'),
     h('label', {}, 'Aktuelles Passwort', h('input', { name: 'old_password', type: 'password', required: true, autocomplete: 'current-password' })),
     h('label', {}, 'Neues Passwort (mind. 8 Zeichen)', h('input', { name: 'new_password', type: 'password', required: true, minlength: 8, autocomplete: 'new-password' })),
     h('p', {}, h('button', { type: 'submit' }, 'Ändern')));
@@ -564,7 +681,31 @@ function renderAccount() {
     ev.preventDefault();
     try { await api('POST', '/api/me/password', Object.fromEntries(new FormData(form))); toast('Passwort geändert.'); form.reset(); } catch (e) { toast(e.message, true); }
   });
-  setMain(form);
+
+  const askCode = (question) => {
+    const c = prompt(`${question}\n\nBitte den aktuellen Code aus der Authenticator-App eingeben:`);
+    return c ? c.trim() : null;
+  };
+  const twofa = h('div', { class: 'card', style: { maxWidth: '480px' } }, h('h2', {}, 'Zwei-Faktor-Anmeldung'),
+    user.totp_enabled
+      ? [h('p', {}, h('span', { class: 'badge ok' }, 'eingerichtet'), ` · ${user.recovery_left} Wiederherstellungscodes übrig`),
+        h('div', { class: 'toolbar' },
+          h('button', { class: 'ghost', onclick: async () => {
+            const code = askCode('Neue Wiederherstellungscodes erzeugen? Die alten werden ungültig.');
+            if (!code) return;
+            try { const r = await api('POST', '/api/2fa/recovery-codes', { code }); showRecoveryCodes(r.recovery_codes, () => go('account')); } catch (e) { toast(e.message, true); }
+          } }, 'Neue Wiederherstellungscodes'),
+          h('button', { class: 'ghost', onclick: () => {
+            if (confirm('Neues Handy einrichten? Danach gilt nur noch der neue QR-Code.')) renderSetup(true);
+          } }, 'Neues Handy einrichten'),
+          !settings.zwei_faktor_pflicht ? h('button', { class: 'danger', onclick: async () => {
+            const code = askCode('Zwei-Faktor-Anmeldung deaktivieren?');
+            if (!code) return;
+            try { await api('POST', '/api/2fa/disable', { code }); toast('Deaktiviert.'); renderAccount(); } catch (e) { toast(e.message, true); }
+          } }, 'Deaktivieren') : null)]
+      : [h('p', {}, h('span', { class: 'badge warn' }, 'nicht eingerichtet')),
+        h('p', {}, h('button', { onclick: () => renderSetup(true) }, 'Jetzt einrichten'))]);
+  setMain(form, twofa);
 }
 
 boot();

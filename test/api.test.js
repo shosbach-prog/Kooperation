@@ -3,6 +3,27 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { openDb } = require('../src/db');
 const { createApp } = require('../src/app');
+const TOTP = require('../src/totp');
+
+const secrets = new Map(); // Benutzer → TOTP-Geheimnis
+const recovery = new Map(); // Benutzer → Wiederherstellungscodes
+
+/** Vollständige Anmeldung inkl. Einrichtung bzw. Eingabe des zweiten Faktors */
+async function login(c, username, password) {
+  let r = await c('POST', '/api/login', { username, password });
+  if (r.status !== 200) return r;
+  if (r.data.stage === 'setup') {
+    const s = await c('POST', '/api/2fa/setup');
+    const secret = new URL(s.data.uri.replace('otpauth://', 'http://')).searchParams.get('secret');
+    secrets.set(username, secret);
+    r = await c('POST', '/api/2fa/enable', { code: TOTP.totp(secret) });
+    recovery.set(username, r.data.recovery_codes);
+  } else if (r.data.stage === '2fa') {
+    // Code dieses Zeitfensters wurde evtl. schon benutzt → Wiederherstellungscode
+    r = await c('POST', '/api/login/2fa', { code: recovery.get(username).pop() });
+  }
+  return r;
+}
 
 let server, base;
 
@@ -41,9 +62,9 @@ test('Ablauf: Plan erzeugen, eintragen, Regeln, Auswertung', async () => {
 
   assert.equal((await mgr('GET', '/api/users')).status, 401);
   assert.equal((await mgr('POST', '/api/login', { username: 'manager', password: 'falsch' })).status, 401);
-  assert.equal((await mgr('POST', '/api/login', { username: 'manager', password: 'manager123' })).status, 200);
-  assert.equal((await anna('POST', '/api/login', { username: 'abecker', password: 'demo123' })).status, 200);
-  assert.equal((await murat('POST', '/api/login', { username: 'myilmaz', password: 'demo123' })).status, 200);
+  assert.equal((await login(mgr, 'manager', 'manager123')).status, 200);
+  assert.equal((await login(anna, 'abecker', 'demo123')).status, 200);
+  assert.equal((await login(murat, 'myilmaz', 'demo123')).status, 200);
 
   // Mitarbeitende dürfen nichts verwalten
   assert.equal((await anna('POST', '/api/shifts/generate', { from: future(10), to: future(12) })).status, 403);
@@ -100,7 +121,7 @@ test('Ablauf: Plan erzeugen, eintragen, Regeln, Auswertung', async () => {
   // Maximalbesetzung
   await anna('POST', `/api/shifts/${früh.id}/assign`);
   const julia = client();
-  await julia('POST', '/api/login', { username: 'jschmitz', password: 'demo123' });
+  await login(julia, 'jschmitz', 'demo123');
   r = await julia('POST', `/api/shifts/${früh.id}/assign`);
   assert.equal(r.data.code, 'VOLL');
 
@@ -125,11 +146,74 @@ test('Ablauf: Plan erzeugen, eintragen, Regeln, Auswertung', async () => {
 
 test('Dienstzeiten ändern und auf zukünftige Schichten übertragen', async () => {
   const mgr = client();
-  await mgr('POST', '/api/login', { username: 'manager', password: 'manager123' });
+  assert.equal((await login(mgr, 'manager', 'manager123')).status, 200);
   const types = (await mgr('GET', '/api/shift-types')).data;
   const f = types.find((t) => t.code === 'F');
   const r = await mgr('PUT', `/api/shift-types/${f.id}`, { start_time: '06:15', end_time: '14:45', apply_future: true });
   assert.equal(r.status, 200);
   assert.ok(r.data.updated_shifts > 0);
   assert.equal((await mgr('PUT', `/api/shift-types/${f.id}`, { break_min: 600 })).status, 400);
+});
+
+test('Zwei-Faktor-Anmeldung: Pflicht, falscher Code, Sperre, Zurücksetzen', async () => {
+  const kevin = client();
+  // Nach dem Passwort ist ohne 2FA-Einrichtung kein Zugriff möglich
+  let r = await kevin('POST', '/api/login', { username: 'kschulz', password: 'demo123' });
+  assert.equal(r.data.stage, 'setup');
+  r = await kevin('GET', '/api/plan?from=2026-01-01&to=2026-01-07');
+  assert.equal(r.status, 401);
+  assert.equal(r.data.code, 'STAGE_SETUP');
+
+  const s = await kevin('POST', '/api/2fa/setup');
+  assert.match(s.data.qr, /^data:image\/png;base64,/);
+  const secret = new URL(s.data.uri.replace('otpauth://', 'http://')).searchParams.get('secret');
+  assert.equal((await kevin('POST', '/api/2fa/enable', { code: '000000' === TOTP.totp(secret) ? '111111' : '000000' })).status, 400);
+  r = await kevin('POST', '/api/2fa/enable', { code: TOTP.totp(secret) });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.recovery_codes.length, 10);
+  const codes = r.data.recovery_codes;
+  assert.equal((await kevin('GET', '/api/my-shifts')).status, 200);
+
+  // Neue Anmeldung: zweiter Schritt nötig
+  const k2 = client();
+  r = await k2('POST', '/api/login', { username: 'kschulz', password: 'demo123' });
+  assert.equal(r.data.stage, '2fa');
+  assert.equal((await k2('GET', '/api/my-shifts')).data.code, 'STAGE_2FA');
+  // Wiederverwendung desselben Codes wird abgelehnt
+  r = await k2('POST', '/api/login/2fa', { code: TOTP.totp(secret) });
+  assert.equal(r.status, 401);
+  // Wiederherstellungscode funktioniert genau einmal
+  r = await k2('POST', '/api/login/2fa', { code: codes[0] });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.used_recovery, true);
+  assert.equal(r.data.user.recovery_left, 9);
+  const k3 = client();
+  await k3('POST', '/api/login', { username: 'kschulz', password: 'demo123' });
+  assert.equal((await k3('POST', '/api/login/2fa', { code: codes[0] })).status, 401);
+
+  // Nach 5 Fehlversuchen wird das Konto gesperrt (1 Fehlversuch oben schon gezählt)
+  for (let i = 0; i < 3; i++) await k3('POST', '/api/login/2fa', { code: '12345-abcde' });
+  r = await k3('POST', '/api/login/2fa', { code: '12345-abcde' });
+  assert.equal(r.status, 401);
+  r = await client()('POST', '/api/login', { username: 'kschulz', password: 'demo123' });
+  assert.equal(r.status, 429);
+  assert.equal(r.data.code, 'GESPERRT');
+
+  // Manager entsperrt und setzt 2FA zurück (z. B. Handy verloren)
+  const mgr = client();
+  await login(mgr, 'manager', 'manager123');
+  const kevinId = (await mgr('GET', '/api/users')).data.find((u) => u.username === 'kschulz');
+  assert.equal(kevinId.locked, true);
+  assert.equal(kevinId.totp_enabled, true);
+  r = await mgr('PUT', `/api/users/${kevinId.id}`, { reset_2fa: true });
+  assert.equal(r.data.totp_enabled, false);
+  assert.equal(r.data.locked, false);
+  assert.equal((await kevin('GET', '/api/my-shifts')).status, 401); // alte Sitzung beendet
+  r = await client()('POST', '/api/login', { username: 'kschulz', password: 'demo123' });
+  assert.equal(r.data.stage, 'setup');
+
+  // Mitarbeitende dürfen 2FA nicht abschalten, solange sie Pflicht ist
+  const anna = client();
+  await login(anna, 'abecker', 'demo123');
+  assert.equal((await anna('POST', '/api/2fa/disable', { code: '123456' })).status, 400);
 });
