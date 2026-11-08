@@ -1383,6 +1383,17 @@ function createApp(db, opts = {}) {
     res.send(csv);
   }));
 
+  // ---------- Erweiterungen in eigenen Dateien (src/routes/*.js) ----------
+  // Jedes Modul erhält den App-Router und gemeinsame Hilfsfunktionen.
+  const ctx = {
+    db, T, TOTP, HttpError, auth, manager, wrap, audit, getSettings, isoDate, isTime, nowLocalMs, todayIso,
+    hasMgr, isHaupt, publicUser, loadShifts, loadRules, qualMissing, verbundGroup, checkConflicts, absenceOn, uploadDir, express,
+  };
+  ctx.hooks = { notify: () => {} }; // wird vom Benachrichtigungsmodul gesetzt
+  for (const name of fs.readdirSync(path.join(__dirname, 'routes')).filter((f) => f.endsWith('.js')).sort()) {
+    require(path.join(__dirname, 'routes', name))(app, ctx);
+  }
+
   // ---------- Fehlerbehandlung ----------
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Unbekannter Endpunkt.')));
   // eslint-disable-next-line no-unused-vars
