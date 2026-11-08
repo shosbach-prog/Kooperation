@@ -32,6 +32,10 @@ const DEFAULT_SETTINGS = {
   // Übertrag wird ab dem Folgejahr dieses Jahres automatisch berechnet (davor manuell)
   urlaub_auto_ab_jahr: new Date().getFullYear(),
   wunsch_frei_max_monat: 4,
+  ist_frist_tage: 14,
+  ruf_faktor_werktag: 2,
+  ruf_faktor_wochenende: 4,
+  ruf_prozent_stunde: 12.5,
   max_std_tag: 10,
   max_std_woche: 48,
   max_naechte_folge: 5,
@@ -337,6 +341,17 @@ function migrate(db) {
   add('users', "ical_token TEXT NOT NULL DEFAULT ''");
   add('users', 'notify_email INTEGER NOT NULL DEFAULT 1');
   add('users', "admin_units TEXT NOT NULL DEFAULT ''");
+  // Ist-Zeiten je Einsatz (Kommen/Gehen), Einsatzstunden bei Rufbereitschaft
+  add('assignments', "ist_start TEXT NOT NULL DEFAULT ''");
+  add('assignments', "ist_end TEXT NOT NULL DEFAULT ''");
+  add('assignments', 'ist_pause INTEGER');
+  add('assignments', "ist_note TEXT NOT NULL DEFAULT ''");
+  add('assignments', 'ist_by INTEGER');
+  add('assignments', 'ist_at TEXT');
+  add('assignments', 'einsatz_std REAL');
+  // Dienstarten: normaler Dienst, Bereitschaftsdienst (Bewertung in %), Rufbereitschaft
+  add('shift_types', "art TEXT NOT NULL DEFAULT 'dienst'");
+  add('shift_types', 'bewertung INTEGER NOT NULL DEFAULT 100');
   add('units', "kuerzel TEXT NOT NULL DEFAULT ''");
   add('units', "telefon TEXT NOT NULL DEFAULT ''");
   add('units', 'leitung_id INTEGER');

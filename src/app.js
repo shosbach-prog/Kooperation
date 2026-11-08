@@ -700,16 +700,21 @@ function createApp(db, opts = {}) {
     if (!Number.isInteger(br) || br < 0) throw new HttpError(400, 'Pause in ganzen Minuten angeben.');
     const { start, end } = T.shiftInterval('2000-01-01', v.start_time, v.end_time);
     if (br >= (end - start) / 60000) throw new HttpError(400, 'Pause ist länger als die Schicht.');
+    const art = v.art === undefined || v.art === null || v.art === '' ? 'dienst' : v.art;
+    if (!['dienst', 'bereitschaft', 'ruf'].includes(art)) throw new HttpError(400, 'Unbekannte Dienstart.');
+    const bewertung = art === 'bereitschaft' ? Number(v.bewertung ?? 100) : 100;
+    if (!Number.isInteger(bewertung) || bewertung < 1 || bewertung > 100) throw new HttpError(400, 'Bewertung des Bereitschaftsdienstes: 1–100 %.');
     return {
       name: String(v.name).trim(), code: String(v.code).trim().slice(0, 4), start_time: v.start_time, end_time: v.end_time,
       break_min: br, color: /^#[0-9a-f]{6}$/i.test(v.color || '') ? v.color : '#4f7cac', active: v.active === undefined ? 1 : (v.active ? 1 : 0),
+      art, bewertung,
     };
   };
 
   app.post('/api/shift-types', auth, managerFull, wrap((req) => {
     const f = shiftTypeFields(req.body || {});
-    const id = db.prepare('INSERT INTO shift_types (name, code, start_time, end_time, break_min, color, active) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(f.name, f.code, f.start_time, f.end_time, f.break_min, f.color, f.active).lastInsertRowid;
+    const id = db.prepare('INSERT INTO shift_types (name, code, start_time, end_time, break_min, color, active, art, bewertung) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(f.name, f.code, f.start_time, f.end_time, f.break_min, f.color, f.active, f.art, f.bewertung).lastInsertRowid;
     audit(req.user.id, 'shift_type.create', { id, ...f });
     return db.prepare('SELECT * FROM shift_types WHERE id = ?').get(id);
   }));
@@ -719,8 +724,8 @@ function createApp(db, opts = {}) {
     const cur = db.prepare('SELECT * FROM shift_types WHERE id = ?').get(id);
     if (!cur) throw new HttpError(404, 'Nicht gefunden.');
     const f = shiftTypeFields(req.body || {}, cur);
-    db.prepare('UPDATE shift_types SET name=?, code=?, start_time=?, end_time=?, break_min=?, color=?, active=? WHERE id=?')
-      .run(f.name, f.code, f.start_time, f.end_time, f.break_min, f.color, f.active, id);
+    db.prepare('UPDATE shift_types SET name=?, code=?, start_time=?, end_time=?, break_min=?, color=?, active=?, art=?, bewertung=? WHERE id=?')
+      .run(f.name, f.code, f.start_time, f.end_time, f.break_min, f.color, f.active, f.art, f.bewertung, id);
     // Optional: Zeiten in bereits erzeugte, zukünftige Schichten übernehmen
     let updated = 0;
     if (req.body.apply_future) {
@@ -1502,14 +1507,40 @@ function createApp(db, opts = {}) {
       : db.prepare("SELECT * FROM users WHERE role = 'staff' AND active = 1 ORDER BY name").all();
     const r2 = (x) => Math.round(x * 100) / 100;
     const rows = users.map((u) => {
-      const shifts = db.prepare(`SELECT s.* FROM shifts s JOIN assignments a ON a.shift_id = s.id
+      const shifts = db.prepare(`SELECT s.*, a.ist_start, a.ist_end, a.ist_pause, a.einsatz_std, st.art, st.bewertung
+        FROM shifts s JOIN assignments a ON a.shift_id = s.id JOIN shift_types st ON st.id = s.shift_type_id
         WHERE a.user_id = ? AND s.date BETWEEN ? AND ?`).all(u.id, from, to);
       const sum = { stunden: 0, nacht: 0, samstag: 0, sonntag: 0, feiertag: 0, vorfest: 0 };
-      let nachtschichten = 0, euro = 0;
+      let nachtschichten = 0, euro = 0, ueberstunden = 0, istErfasst = 0, bereitschaftStd = 0, rufEinsatzStd = 0, rufEur = 0, rufDienste = 0;
       const beginne = new Set();
+      const satz = Number(u.stundenentgelt) || 0;
       for (const s of shifts) {
+        // Rufbereitschaft (TVöD § 8 Abs. 3): Pauschale je Tag; nur die Einsätze zählen als Arbeitszeit
+        if (s.art === 'ruf') {
+          rufDienste++;
+          const iv = T.shiftInterval(s.date, s.start_time, s.end_time);
+          const dauer = (iv.end - iv.start) / 3600e3;
+          const wd = new Date(T.parseDate(s.date)).getUTCDay();
+          const wochenende = wd === 0 || wd === 6 || !!T.holidayName(s.date);
+          rufEur += dauer >= 12 ? satz * Number(wochenende ? settings.ruf_faktor_wochenende : settings.ruf_faktor_werktag)
+            : satz * dauer * Number(settings.ruf_prozent_stunde) / 100;
+          rufEinsatzStd += Number(s.einsatz_std) || 0;
+          sum.stunden += Number(s.einsatz_std) || 0;
+          continue;
+        }
         beginne.add(s.start_time);
-        const b = T.breakdown(s, settings);
+        // tatsächliche Zeiten haben Vorrang vor dem Plan
+        const hatIst = !!(s.ist_start && s.ist_end);
+        const eff = hatIst ? { ...s, start_time: s.ist_start, end_time: s.ist_end, break_min: s.ist_pause ?? s.break_min } : s;
+        const b = T.breakdown(eff, settings);
+        if (hatIst) { istErfasst++; if (s.art === 'dienst') ueberstunden += b.stunden - T.shiftHours(s); }
+        if (s.art === 'bereitschaft') {
+          // Bereitschaftsdienst: nur der bewertete Anteil zählt als Arbeitszeit, keine Zeitzuschläge
+          const bw = b.stunden * (Number(s.bewertung) || 0) / 100;
+          bereitschaftStd += bw;
+          sum.stunden += bw;
+          continue;
+        }
         for (const k of Object.keys(sum)) sum[k] += b[k];
         if (b.nachtschicht) nachtschichten++;
         euro += T.zuschlagEuro(b, settings, u.stundenentgelt);
@@ -1548,7 +1579,8 @@ function createApp(db, opts = {}) {
         min_hours_month: u.min_hours_month, dienste: shifts.length, nachtschichten,
         gearbeitet: r2(sum.stunden), urlaub_tage: urlaubTage, urlaub_std: r2(urlaubStd), krank_tage: krankTage, krank_std: r2(krankStd),
         sonder_tage: sonderTage, sonder_std: r2(sonderStd), fortbildung_tage: fortbildungTage, fortbildung_std: r2(fortbildungStd),
-        unbezahlt_tage: neutralTage, au_fehlt: auFehlt, soll: r2(soll), ist: r2(ist), saldo: r2(ist - soll),
+        unbezahlt_tage: neutralTage, au_fehlt: auFehlt, ueberstunden: r2(ueberstunden), ist_erfasst: istErfasst,
+        bereitschaft_std: r2(bereitschaftStd), ruf_dienste: rufDienste, ruf_einsatz_std: r2(rufEinsatzStd), ruf_eur: r2(rufEur), soll: r2(soll), ist: r2(ist), saldo: r2(ist - soll),
         nacht: r2(sum.nacht), samstag: r2(sum.samstag), sonntag: r2(sum.sonntag), feiertag: r2(sum.feiertag), vorfest: r2(sum.vorfest),
         zuschlag_eur: r2(euro), min_erfuellt: ist + 1e-9 >= (u.min_hours_month || 0),
       };
@@ -1572,11 +1604,11 @@ function createApp(db, opts = {}) {
     const num = (x) => String(x).replace('.', ',');
     const head = ['Name', 'Qualifikation', 'Wochenstd.', 'Soll', 'Gearbeitet', 'Urlaubstage', 'Urlaub Std.', 'Krankheitstage', 'Krank Std.',
       'Sonderurlaub Tage', 'Sonderurlaub Std.', 'Ist gesamt', 'Saldo', 'Mindeststd.', 'Mindeststd. erfüllt', 'Dienste', 'Nachtschichten', 'Nacht-Std.', 'Samstag-Std.',
-      'Sonntag-Std.', 'Feiertag-Std.', 'Vorfest-Std.', 'Zuschläge EUR', 'Zulage', 'Zulage EUR', 'AU fehlt'];
+      'Sonntag-Std.', 'Feiertag-Std.', 'Vorfest-Std.', 'Zuschläge EUR', 'Zulage', 'Zulage EUR', 'Überstunden (Ist-Plan)', 'Bereitschaft Std. (bewertet)', 'Rufbereitschaft Einsatz Std.', 'Rufbereitschaft EUR', 'AU fehlt'];
     const lines = [head, ...r.rows.map((x) => [x.name, x.qualification, num(x.weekly_hours), num(x.soll), num(x.gearbeitet),
       x.urlaub_tage, num(x.urlaub_std), x.krank_tage, num(x.krank_std), x.sonder_tage, num(x.sonder_std), num(x.ist), num(x.saldo),
       num(x.min_hours_month), x.min_erfuellt ? 'ja' : 'nein', x.dienste, x.nachtschichten, num(x.nacht), num(x.samstag),
-      num(x.sonntag), num(x.feiertag), num(x.vorfest), num(x.zuschlag_eur), x.zulage, num(x.zulage_eur), x.au_fehlt])];
+      num(x.sonntag), num(x.feiertag), num(x.vorfest), num(x.zuschlag_eur), x.zulage, num(x.zulage_eur), num(x.ueberstunden), num(x.bereitschaft_std), num(x.ruf_einsatz_std), num(x.ruf_eur), x.au_fehlt])];
     const csv = '﻿' + lines.map((l) => l.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="zeitkonto-${r.month}.csv"`);

@@ -11,7 +11,7 @@ function bellButton() {
     who.insertBefore(btn, who.firstChild);
   }
   const n = state.notif.unread;
-  btn.replaceChildren(icon('bell'), n ? h('span', { class: 'tab-badge' }, n > 99 ? '99+' : n) : null);
+  btn.replaceChildren(...[icon('bell'), n ? h('span', { class: 'tab-badge' }, n > 99 ? '99+' : String(n)) : null].filter(Boolean));
   btn.setAttribute('aria-label', n ? `Mitteilungen, ${n} ungelesen` : 'Mitteilungen');
   return btn;
 }

@@ -47,6 +47,7 @@ const VIEWS = {
   generate: { label: 'Plan erzeugen', icon: 'wand', group: 'verw', render: () => renderGenerate(), mgr: true },
   types: { label: 'Dienstzeiten', icon: 'clock', group: 'verw', render: () => renderShiftTypes(), mgr: true, full: true },
   req: { label: 'Mindestbesetzung', icon: 'sliders', group: 'verw', render: () => renderRequirements(), mgr: true },
+  zeiten: { label: 'Zeiterfassung', short: 'Zeiten', icon: 'clock', group: 'verw', render: () => renderZeiten(), mgr: true },
   report: { label: 'Auswertung TVöD', short: 'Auswertung', icon: 'chart', group: 'verw', render: () => renderReport(), mgr: true },
   log: { label: 'Protokoll', icon: 'log', group: 'verw', render: () => renderLog(), mgr: true },
   settings: { label: 'Einstellungen', icon: 'settings', group: 'verw', render: () => renderSettings(), mgr: true, full: true },

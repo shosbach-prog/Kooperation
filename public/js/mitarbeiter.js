@@ -6,7 +6,8 @@ async function renderMine() {
   const from = todayIso();
   const shifts = await api('GET', `api/my-shifts?from=${from}&to=${addDays(from, 120)}`);
   const s = state.settings;
-  setMain(h('div', { class: 'card' },
+  const zeiten = await zeitenCard(renderMine).catch(() => null);
+  setMain(zeiten, h('div', { class: 'card' },
     h('h2', {}, 'Meine kommenden Dienste'),
     h('p', { class: 'muted small' }, `Austragen ist bis ${s.austrag_frist_std} Std. vor Dienstbeginn möglich`,
       s.austrag_unter_minimum ? '.' : ', sofern die Mindestbesetzung nicht unterschritten wird.'),
@@ -54,6 +55,7 @@ function zuschlagTable(rows, withName) {
     ...(withName ? [['min_hours_month', 'Mindest-Std.', true]] : []),
     ['dienste', 'Dienste', true, 0], ['nachtschichten', 'Nachtschichten', true, 0],
     ['nacht', 'Nacht', true], ['samstag', 'Samstag', true], ['sonntag', 'Sonntag', true], ['feiertag', 'Feiertag', true], ['vorfest', '24./31.12.', true],
+    ['ueberstunden', 'Mehr-/Minderzeit', true], ['bereitschaft_std', 'Bereitschaft (gewertet)', true], ['ruf_dienste', 'Rufbereitschaften', true, 0], ['ruf_einsatz_std', 'Ruf-Einsatz', true], ['ruf_eur', 'Ruf-Pauschale €', true],
     ['zuschlag_eur', 'Zuschläge €', true], ['zulage', 'Zulage', false], ['zulage_eur', 'Zulage €', true],
   ];
   return h('div', { class: 'table-wrap' }, h('h3', {}, 'Stunden und Zeitzuschläge'),

@@ -481,3 +481,79 @@ test('Weitere Abwesenheitsarten und Resturlaub-Übertrag', async () => {
   assert.equal((await mgr('PUT', '/api/settings', { urlaub_uebertrag_bis: '05-31' })).status, 200);
   await mgr('PUT', '/api/settings', { urlaub_uebertrag_bis: '03-31' });
 });
+
+test('Ist-Zeiten, Bereitschaftsdienst und Rufbereitschaft', async () => {
+  // eigener Mitarbeiter, damit andere Tests nicht stören
+  const nu = await mgr('POST', '/api/users', { username: 'zeittest', name: 'Zeit Test', password: 'demo12345', role: 'staff', weekly_hours: 38.5, stundenentgelt: 20 });
+  assert.equal(nu.status, 200, JSON.stringify(nu.data));
+  const uid = nu.data.id;
+  const zt = client();
+  await login(zt, 'zeittest', 'demo12345');
+  const past = (n) => day(-n);
+  // Frühdienst vor 2 Tagen, 1 Std. länger gearbeitet
+  const f = await shiftOn(past(2), 'F', 'Station 2');
+  assert.equal((await mgr('POST', `/api/shifts/${f.id}/assign`, { user_id: uid, force: true })).status, 200);
+  const z0 = (await zt('GET', '/api/zeiten?mine=1')).data;
+  assert.ok(z0.zeiten.some((z) => z.shift_id === f.id && z.ist_std === null));
+  const [eh, em] = f.end_time.split(':').map(Number);
+  const spaeter = `${String((eh + 1) % 24).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
+  let r = await zt('PUT', `/api/zeiten/${f.id}`, { ist_start: f.start_time, ist_end: spaeter, ist_pause: f.break_min, ist_note: 'Übergabe' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.diff_std, 1);
+  // Plausibilität
+  assert.equal((await zt('PUT', `/api/zeiten/${f.id}`, { ist_start: '25:00', ist_end: spaeter })).status, 400);
+  // Frist: nach 14 Tagen nur noch Verwaltung
+  const alt = await shiftOn(past(20), 'F', 'Station 2');
+  await mgr('POST', `/api/shifts/${alt.id}/assign`, { user_id: uid, force: true });
+  r = await zt('PUT', `/api/zeiten/${alt.id}`, { ist_start: alt.start_time, ist_end: alt.end_time });
+  assert.equal(r.data.code, 'FRIST');
+  assert.equal((await mgr('PUT', `/api/zeiten/${alt.id}`, { user_id: uid, ist_start: alt.start_time, ist_end: alt.end_time })).status, 200);
+  // Zukunft nicht erfassbar
+  const fut = await shiftOn(day(30), 'F', 'Station 2');
+  await mgr('POST', `/api/shifts/${fut.id}/assign`, { user_id: uid, force: true });
+  assert.equal((await zt('PUT', `/api/zeiten/${fut.id}`, { ist_start: fut.start_time, ist_end: fut.end_time })).status, 400);
+  // fremde Zeiten nicht änderbar
+  r = await zt('PUT', `/api/zeiten/${f.id}`, { user_id: users.abecker, ist_start: f.start_time, ist_end: spaeter, ist_pause: f.break_min });
+  assert.equal(r.data.user_id, uid); // user_id wird bei Mitarbeitenden ignoriert
+
+  // Report: Überstunde zählt
+  const month = past(2).slice(0, 7);
+  let row = (await mgr('GET', `/api/report?month=${month}&user_id=${uid}`)).data.rows[0];
+  assert.equal(row.ueberstunden, 1);
+
+  // Bereitschaftsdienst (Wertung 50 %) und Rufbereitschaft als eigene Dienstarten
+  const st2 = (await mgr('GET', '/api/units')).data.find((u) => u.name === 'Station 2').id;
+  const bd = (await mgr('POST', '/api/shift-types', { name: 'Bereitschaft', code: 'BD', start_time: '16:00', end_time: '22:00', break_min: 0, color: '#888888', art: 'bereitschaft', bewertung: 50, active: true })).data;
+  const rb = (await mgr('POST', '/api/shift-types', { name: 'Rufbereitschaft', code: 'RB', start_time: '08:00', end_time: '08:00', break_min: 0, color: '#999999', art: 'ruf', bewertung: 100, active: true })).data;
+  assert.equal((await mgr('POST', '/api/shift-types', { name: 'X', code: 'X', start_time: '08:00', end_time: '09:00', break_min: 0, art: 'quatsch' })).status, 400);
+  const reqs = [0, 1, 2, 3, 4, 5, 6].flatMap((w) => [{ unit_id: st2, shift_type_id: bd.id, weekday: w, min_staff: 1 }, { unit_id: st2, shift_type_id: rb.id, weekday: w, min_staff: 1 }]);
+  await mgr('PUT', '/api/requirements', reqs);
+  // Werktag (Mo–Fr, kein Feiertag) in der Vergangenheit, gleicher Monat wie oben möglichst egal
+  const wd = (() => { for (let i = 3; ; i++) { const x = new Date(day(-i)); if (x.getUTCDay() >= 2 && x.getUTCDay() <= 4) return day(-i); } })();
+  const bdS = await shiftOn(wd, 'BD', 'Station 2');
+  const rbDay = (() => { const x = new Date(Date.parse(wd) - 86400000); return x.toISOString().slice(0, 10); })();
+  const rbS = await shiftOn(rbDay, 'RB', 'Station 2');
+  assert.ok(bdS && rbS);
+  await mgr('POST', `/api/shifts/${bdS.id}/assign`, { user_id: uid, force: true });
+  await mgr('POST', `/api/shifts/${rbS.id}/assign`, { user_id: uid, force: true });
+  r = await zt('PUT', `/api/zeiten/${rbS.id}`, { einsatz_std: 2.5 });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.einsatz_std, 2.5);
+  assert.equal((await zt('PUT', `/api/zeiten/${rbS.id}`, { einsatz_std: 30 })).status, 400);
+  const rep = (await mgr('GET', `/api/report?month=${wd.slice(0, 7)}&user_id=${uid}`)).data.rows[0];
+  assert.equal(rep.bereitschaft_std, 3); // 6 Std. × 50 %
+  assert.equal(rep.ruf_dienste, 1);
+  assert.equal(rep.ruf_einsatz_std, 2.5);
+  // 24 Std. Rufbereitschaft an einem Werktag: 2 × 20 € (Montag–Freitag; Sonntag/Feiertag → 4 ×)
+  const we = [0, 6].includes(new Date(rbDay).getUTCDay());
+  assert.ok([40, 80].includes(rep.ruf_eur), String(rep.ruf_eur));
+  if (!we) assert.equal(rep.ruf_eur, 40);
+  // Zurücksetzen durch Verwaltung
+  assert.equal((await mgr('DELETE', `/api/zeiten/${f.id}?user_id=${uid}`)).status, 200);
+  row = (await mgr('GET', `/api/report?month=${month}&user_id=${uid}`)).data.rows[0];
+  assert.equal(row.ueberstunden, 0);
+  const csv = (await mgr('GET', `/api/report.csv?month=${wd.slice(0, 7)}`)).data;
+  assert.match(csv, /Ruf/);
+  // Typen wieder deaktivieren, damit andere Tests unberührt bleiben
+  await mgr('PUT', '/api/requirements', reqs.map((x) => ({ ...x, min_staff: 0 })));
+});

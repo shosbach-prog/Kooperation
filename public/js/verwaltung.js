@@ -10,12 +10,16 @@ async function renderShiftTypes() {
       name: inp('name', { placeholder: 'z. B. Frühdienst' }), code: inp('code', { size: 3, maxlength: 4, placeholder: 'F' }),
       start_time: inp('start_time', { type: 'time' }), end_time: inp('end_time', { type: 'time' }),
       break_min: inp('break_min', { type: 'number', min: 0, step: 5 }), color: h('input', { type: 'color', value: t?.color || '#4f7cac' }),
+      art: h('select', { 'aria-label': 'Art' }, Object.entries(ART_LABEL).map(([v, l]) => h('option', { value: v, selected: (t?.art || 'dienst') === v }, l))),
+      bewertung: inp('bewertung', { type: 'number', min: 1, max: 100, step: 1, 'aria-label': 'Bewertung in Prozent', title: 'Bereitschaftsdienst: Anteil, der als Arbeitszeit gilt (Stufe I–IV, z. B. 60 %)' }),
       active: h('input', { type: 'checkbox', checked: t ? !!t.active : true }),
     };
+    if (!t) r.bewertung.value = 100;
     if (!t) r.break_min.value = 30;
     const save = async () => {
       const body = Object.fromEntries(Object.entries(r).map(([k, el]) => [k, el.type === 'checkbox' ? el.checked : el.value]));
       body.break_min = Number(body.break_min);
+      body.bewertung = Number(body.bewertung) || 100;
       if (t && (body.start_time !== t.start_time || body.end_time !== t.end_time || body.break_min !== t.break_min)) {
         body.apply_future = await uiConfirm('Sollen die geänderten Zeiten auch für bereits erzeugte, zukünftige Schichten gelten?',
           { title: 'Zeiten übernehmen?', okText: 'Ja, übernehmen', cancelText: 'Nur für neue' });
@@ -32,9 +36,11 @@ async function renderShiftTypes() {
 
   setMain(
     h('div', { class: 'card' }, h('h2', {}, 'Dienstzeiten (Schichtarten)'),
-      h('p', { class: 'muted small' }, 'Endet ein Dienst vor seinem Beginn (z. B. 21:30–06:30), geht er über Mitternacht. Die Pause wird nicht als Arbeitszeit angerechnet.'),
+      h('p', { class: 'muted small' }, 'Endet ein Dienst vor seinem Beginn (z. B. 21:30–06:30), geht er über Mitternacht. Die Pause wird nicht als Arbeitszeit angerechnet. ',
+        'Art „Bereitschaftsdienst“: es zählt nur der Wertungsanteil als Arbeitszeit (TVöD-K § 7.1 / Anhang zu § 9, Stufen I–IV), ohne Zeitzuschläge. ',
+        'Art „Rufbereitschaft“: Pauschale nach TVöD § 8 Abs. 3 (siehe Einstellungen); angerechnet werden nur die erfassten Einsatzstunden.'),
       h('div', { class: 'table-wrap' }, h('table', {},
-        h('thead', {}, h('tr', {}, ['Bezeichnung', 'Kürzel', 'Beginn', 'Ende', 'Pause (Min.)', 'Farbe', 'Aktiv', 'Std.', ''].map((x) => h('th', {}, x)))),
+        h('thead', {}, h('tr', {}, ['Bezeichnung', 'Kürzel', 'Beginn', 'Ende', 'Pause (Min.)', 'Farbe', 'Art', 'Wertung %', 'Aktiv', 'Std.', ''].map((x) => h('th', {}, x)))),
         h('tbody', {}, types.map(typeRow), typeRow(null))))),
     h('p', { class: 'small muted' }, 'Stationen legen Sie unter ', h('a', { href: '#stationen', onclick: (e) => { e.preventDefault(); go('stationen'); } }, 'Stationen'), ' an.'));
 }
@@ -140,6 +146,10 @@ async function renderSettings() {
     ['zulage_wechselschicht_eur', 'Wechselschichtzulage pro Monat (€)', 'number', 'TVöD § 8 Abs. 5 – Betrag bitte mit aktuellem Tarif abgleichen'],
     ['wechselschicht_min_naechte', 'Wechselschicht ab … Nachtschichten im Monat', 'number', 'TVöD § 7 Abs. 1: mind. 2 Nachtschichten'],
     ['zulage_schicht_eur', 'Schichtzulage pro Monat (€)', 'number', 'TVöD § 8 Abs. 6 – Betrag bitte mit aktuellem Tarif abgleichen'],
+    ['ist_frist_tage', 'Ist-Zeiten selbst erfassen bis … Tage nach dem Dienst', 'number', 'Danach nur noch durch die Verwaltung; 0 = unbegrenzt'],
+    ['ruf_faktor_werktag', 'Rufbereitschaft ≥ 12 Std. Mo–Fr: Pauschale = … × Stundenentgelt', 'number', 'TVöD § 8 Abs. 3: 2-fach'],
+    ['ruf_faktor_wochenende', 'Rufbereitschaft ≥ 12 Std. Sa/So/Feiertag: … × Stundenentgelt', 'number', 'TVöD § 8 Abs. 3: 4-fach'],
+    ['ruf_prozent_stunde', 'Rufbereitschaft unter 12 Std.: … % des Stundenentgelts je Stunde', 'number', 'TVöD § 8 Abs. 3: 12,5 %'],
     ['urlaub_uebertrag_bis', 'Resturlaub aus dem Vorjahr verfällt am (MM-TT)', 'text', 'TVöD § 26 Abs. 2: 03-31 (in Ausnahmefällen 05-31)'],
     ['wunsch_frist_tage', 'Dienstwünsche möglich ab … Tagen im Voraus', 'number', 'z. B. 14: Wünsche für die nächsten zwei Wochen sind gesperrt.'],
     ['wunsch_frei_max_monat', 'Höchstzahl „Wunsch frei“ pro Person und Monat', 'number', '0 = unbegrenzt'],

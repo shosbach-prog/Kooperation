@@ -95,7 +95,7 @@ function fitTables(root = main()) {
     if (table.classList.contains('keep-table') && W >= 760) continue;
     const wrap = table.parentElement;
     const tooWide = table.scrollWidth > (wrap?.clientWidth || W) + 4;
-    if (W < 760 || single || (W < 1100 && tooWide)) table.classList.add('as-cards');
+    if (W < 760 || single || (W < 1280 && tooWide)) table.classList.add('as-cards');
     if (single && W >= 760) table.classList.add('single');
   }
 }
