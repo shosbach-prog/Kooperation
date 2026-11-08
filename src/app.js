@@ -98,7 +98,7 @@ function createApp(db, opts = {}) {
   // ---------- Authentifizierung (Passwort + Zwei-Faktor) ----------
   const MAX_FAILS = 5;
   const LOCK_MIN = 15;
-  const PENDING_MIN = 10;
+  const PENDING_MIN = 20;
 
   app.use((req, _res, next) => {
     const token = parseCookies(req).sid;
@@ -210,7 +210,9 @@ function createApp(db, opts = {}) {
     try {
       const u = req.user || (req.pending?.session_stage === 'setup' ? req.pending : null);
       if (!u) throw new HttpError(401, 'Bitte anmelden.');
-      const secret = TOTP.generateSecret();
+      // Noch nicht bestätigten Schlüssel wiederverwenden: Wechselt man auf dem Handy in die
+      // Authenticator-App und zurück, lädt der Browser die Seite oft neu – der Schlüssel muss gleich bleiben.
+      const secret = (!req.body?.neu && u.totp_pending) || TOTP.generateSecret();
       db.prepare('UPDATE users SET totp_pending = ? WHERE id = ?').run(secret, u.id);
       const uri = TOTP.otpauthUri(secret, u.username, getSettings().klinik_name || 'Personaleinsatzplanung');
       const qr = await QRCode.toDataURL(uri, { margin: 1, width: 220 });

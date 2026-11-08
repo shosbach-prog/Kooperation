@@ -182,6 +182,9 @@ test('Zwei-Faktor-Anmeldung: Pflicht, falscher Code, Sperre, Zurücksetzen', asy
   assert.equal(r.data.code, 'STAGE_SETUP');
 
   const s = await kevin('POST', '/api/2fa/setup');
+  // Seite neu geladen (z. B. nach Wechsel in die Authenticator-App): gleicher Schlüssel
+  assert.equal((await kevin('POST', '/api/2fa/setup')).data.secret, s.data.secret);
+  assert.match(s.data.uri, /^otpauth:\/\/totp\//);
   assert.match(s.data.qr, /^data:image\/png;base64,/);
   const secret = new URL(s.data.uri.replace('otpauth://', 'http://')).searchParams.get('secret');
   assert.equal((await kevin('POST', '/api/2fa/enable', { code: '000000' === TOTP.totp(secret) ? '111111' : '000000' })).status, 400);

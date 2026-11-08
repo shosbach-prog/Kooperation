@@ -1089,9 +1089,9 @@ function renderCodeStep() {
 }
 
 /** Einrichtung des zweiten Faktors – bei der ersten Anmeldung (inApp=false) oder unter „Sicherheit“ */
-async function renderSetup(inApp) {
+async function renderSetup(inApp, neu = false) {
   let data;
-  try { data = await api('POST', 'api/2fa/setup'); } catch (e) { if (!inApp) renderLogin(); else toast(e.message, true); return; }
+  try { data = await api('POST', 'api/2fa/setup', neu ? { neu: true } : undefined); } catch (e) { if (!inApp) renderLogin(); else toast(e.message, true); return; }
   const input = h('input', { inputmode: 'numeric', autocomplete: 'one-time-code', required: true, placeholder: '123456', maxlength: 6, class: 'code-input' });
   const err = h('p', { class: 'error' });
   const form = h('form', {}, h('label', {}, '3. Angezeigten Code eingeben', input), h('button', { type: 'submit' }, 'Aktivieren'), err);
@@ -1102,16 +1102,35 @@ async function renderSetup(inApp) {
       showRecoveryCodes(r.recovery_codes, inApp ? () => go('account') : boot);
     } catch (e) { err.textContent = e.message; input.select(); }
   });
+  const rawSecret = data.secret.replace(/\s/g, '');
+  const copyKey = () => navigator.clipboard.writeText(rawSecret)
+    .then(() => toast('Schlüssel kopiert. In der Authenticator-App „Schlüssel eingeben“ wählen und einfügen.'))
+    .catch(() => toast('Kopieren nicht möglich – bitte den Schlüssel abtippen.', true));
+  const onThisPhone = isPhone() || window.matchMedia('(pointer: coarse)').matches;
+  const phoneWay = h('div', { class: 'setup-phone' },
+    h('a', { class: 'button-link', href: data.uri }, '📲 In Authenticator-App öffnen'),
+    h('p', { class: 'small muted' }, 'Die App öffnet sich und fragt, ob das Konto hinzugefügt werden soll. Bestätigen, dann hierher ',
+      'zurückwechseln und den 6-stelligen Code eingeben.'),
+    h('details', {}, h('summary', { class: 'small' }, 'App öffnet sich nicht? Schlüssel von Hand eingeben'),
+      h('p', { class: 'small' }, 'In der App „Konto hinzufügen“ → „Schlüssel eingeben“ (bzw. „Einrichtungsschlüssel“) wählen:'),
+      h('div', { class: 'key-row' }, h('code', { class: 'secret' }, data.secret), h('button', { type: 'button', class: 'tiny', onclick: copyKey }, 'Kopieren')),
+      h('p', { class: 'small muted' }, `Kontoname: ${state.branding?.klinik_name || 'Dienstplan'} · Typ: zeitbasiert · 6 Stellen`)));
+  const qrWay = h('div', {},
+    h('div', { class: 'qr' }, h('img', { src: data.qr, alt: 'QR-Code für die Authenticator-App', width: 220, height: 220 })),
+    h('details', {}, h('summary', { class: 'small' }, 'QR-Code lässt sich nicht scannen?'),
+      h('p', { class: 'small' }, 'Schlüssel manuell eingeben (zeitbasiert, 6 Stellen):'),
+      h('div', { class: 'key-row' }, h('code', { class: 'secret' }, data.secret), h('button', { type: 'button', class: 'tiny', onclick: copyKey }, 'Kopieren'))));
   const content = [
     h('h1', {}, 'Zwei-Faktor-Anmeldung einrichten'),
     !inApp ? h('p', { class: 'muted' }, 'Zum Schutz der Dienstplan- und Personaldaten ist ein zweiter Faktor vorgeschrieben. Die Einrichtung dauert etwa eine Minute.') : null,
     h('ol', { class: 'steps' },
-      h('li', {}, 'Installieren Sie eine Authenticator-App auf Ihrem Handy, z. B. ', h('strong', {}, 'Microsoft Authenticator'), ', ',
-        h('strong', {}, 'Google Authenticator'), ' oder ', h('strong', {}, 'FreeOTP'), '.'),
-      h('li', {}, 'Scannen Sie in der App diesen QR-Code:',
-        h('div', { class: 'qr' }, h('img', { src: data.qr, alt: 'QR-Code für die Authenticator-App', width: 220, height: 220 })),
-        h('details', {}, h('summary', { class: 'small' }, 'QR-Code lässt sich nicht scannen?'),
-          h('p', { class: 'small' }, 'Schlüssel manuell eingeben (zeitbasiert, 6 Stellen):'), h('code', { class: 'secret' }, data.secret)))),
+      h('li', {}, 'Installieren Sie eine Authenticator-App auf Ihrem Handy, z. B. ', h('strong', {}, 'Google Authenticator'), ', ',
+        h('strong', {}, 'Microsoft Authenticator'), ', ', h('strong', {}, '2FAS'), ' oder ', h('strong', {}, 'FreeOTP'), ' (kostenlos im App Store / Play Store).'),
+      onThisPhone
+        ? h('li', {}, 'Konto in die App übernehmen:', phoneWay,
+          h('details', {}, h('summary', { class: 'small' }, 'Einrichtung lieber mit QR-Code (z. B. am PC)?'), qrWay))
+        : h('li', {}, 'Scannen Sie in der App diesen QR-Code:', qrWay,
+          h('p', { class: 'small muted' }, 'Sie sind schon am Handy mit der App? Dann ', h('a', { href: data.uri }, 'hier tippen'), ', um das Konto direkt zu übernehmen.'))),
     form,
     h('p', {}, h('button', { class: 'ghost', type: 'button', onclick: inApp ? () => go('account') : cancelLogin }, 'Abbrechen')),
   ];
@@ -1167,7 +1186,7 @@ async function renderAccount() {
             try { const r = await api('POST', 'api/2fa/recovery-codes', { code }); showRecoveryCodes(r.recovery_codes, () => go('account')); } catch (e) { toast(e.message, true); }
           } }, 'Neue Wiederherstellungscodes'),
           h('button', { class: 'ghost', onclick: () => {
-            if (confirm('Neues Handy einrichten? Danach gilt nur noch der neue QR-Code.')) renderSetup(true);
+            if (confirm('Neues Handy einrichten? Danach gilt nur noch der neue Schlüssel.')) renderSetup(true, true);
           } }, 'Neues Handy einrichten'),
           !settings.zwei_faktor_pflicht ? h('button', { class: 'danger', onclick: async () => {
             const code = askCode('Zwei-Faktor-Anmeldung deaktivieren?');
