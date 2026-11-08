@@ -189,6 +189,33 @@ CREATE TABLE IF NOT EXISTS swap_offers (
   decision_note TEXT NOT NULL DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  titel TEXT NOT NULL,
+  text TEXT NOT NULL DEFAULT '',
+  link TEXT NOT NULL DEFAULT '',
+  art TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  read_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read_at);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Geheimnisse (z. B. Push-Schlüssel); werden nie an den Browser ausgeliefert
+CREATE TABLE IF NOT EXISTS secrets (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+
+-- einmalige Erinnerungen (verhindert doppelte Benachrichtigungen)
+CREATE TABLE IF NOT EXISTS reminders_sent (key TEXT PRIMARY KEY, at TEXT NOT NULL DEFAULT (datetime('now')));
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -278,6 +305,7 @@ function migrate(db) {
   add('users', "admin_rechte TEXT NOT NULL DEFAULT 'keine'");
   add('users', 'foto_version INTEGER NOT NULL DEFAULT 0');
   add('users', "ical_token TEXT NOT NULL DEFAULT ''");
+  add('users', 'notify_email INTEGER NOT NULL DEFAULT 1');
   add('units', "kuerzel TEXT NOT NULL DEFAULT ''");
   add('units', "telefon TEXT NOT NULL DEFAULT ''");
   add('units', 'leitung_id INTEGER');

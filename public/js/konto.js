@@ -163,7 +163,7 @@ async function renderAccount() {
         h('p', {}, h('button', { onclick: () => renderSetup(true) }, 'Jetzt einrichten'))]);
   const profil = h('div', { class: 'card', style: { maxWidth: '480px' } }, h('h2', {}, 'Mein Foto'),
     fotoControl(user, 'api/me/foto', async () => { await refreshMe(); renderAccount(); }));
-  setMain(profil, await kalenderCard(), form, twofa);
+  setMain(profil, await notifyCard(), await kalenderCard(), form, twofa);
 }
 
 // Als App installierbar (Startbildschirm); der Service Worker speichert nur die Programmdateien, keine Personaldaten

@@ -161,3 +161,67 @@ test('Tauschbörse: anbieten, übernehmen, bestätigen, Regeln', async () => {
   const log = (await mgr('GET', '/api/log')).data;
   assert.ok(log.some((l) => l.action === 'swap.done'));
 });
+
+test('Benachrichtigungen: Ereignisse, Push-Abo, Rundruf, AU-Erinnerung', async () => {
+  const lena = await as('lhoffmann');
+  const unread = async (c) => (await c('GET', '/api/notifications')).data;
+  // Verwaltung trägt Lena ein → Mitteilung „Neuer Dienst“
+  const s = await shiftOn(day(20), 'S');
+  await mgr('POST', `/api/shifts/${s.id}/assign`, { user_id: users.lhoffmann });
+  let n = await unread(lena);
+  assert.ok(n.unread >= 1);
+  assert.equal(n.items[0].titel, 'Neuer Dienst');
+  assert.match(n.items[0].text, /Spätdienst/);
+  // eigene Eintragung erzeugt keine Mitteilung an sich selbst
+  const before = n.unread;
+  // Urlaubsantrag → Verwaltung wird informiert; Entscheidung → Lena wird informiert
+  const mon = (() => { for (let i = 30; ; i++) { const d = day(i); if (new Date(d).getUTCDay() === 2) return d; } })();
+  const a = (await lena('POST', '/api/absences', { type: 'urlaub', from: mon, to: mon })).data;
+  assert.ok((await unread(mgr)).items.some((x) => x.titel.startsWith('Antrag: Erholungsurlaub')));
+  await mgr('PUT', `/api/absences/${a.id}/decision`, { status: 'genehmigt' });
+  n = await unread(lena);
+  assert.equal(n.items[0].titel, 'Erholungsurlaub genehmigt');
+  assert.equal(n.unread, before + 1);
+  // als gelesen markieren
+  await lena('POST', '/api/notifications/read', { ids: [n.items[0].id] });
+  assert.equal((await unread(lena)).unread, before);
+  await lena('POST', '/api/notifications/read', {});
+  assert.equal((await unread(lena)).unread, 0);
+
+  // Push-Abo speichern (Versand an Test-Endpunkt schlägt still fehl)
+  assert.equal((await lena('POST', '/api/push/subscribe', { subscription: { endpoint: 'http://unsicher' } })).status, 400);
+  const sub = { endpoint: 'https://push.example.invalid/abc', keys: { p256dh: 'BOr9W1BKj6bN3lB8vQ1Wq3m1h3r8y3z0x6m7c8f4D1kq9hW8zq0cLk6nX0A0H1f8l3W6x9QeY1d2Z3a4b5c6d7e8', auth: 'aGVsbG8td29ybGQtMTIz' } };
+  assert.equal((await lena('POST', '/api/push/subscribe', { subscription: sub })).data.geraete, 1);
+  assert.equal((await lena('GET', '/api/me/notify-prefs')).data.geraete, 1);
+  assert.equal((await lena('DELETE', '/api/push/subscribe', { endpoint: sub.endpoint })).status, 200);
+  assert.equal((await lena('GET', '/api/me/notify-prefs')).data.geraete, 0);
+  // Push-Schlüssel: öffentlich abrufbar, privater Schlüssel nie in Einstellungen
+  assert.ok((await lena('GET', '/api/push/key')).data.key.length > 50);
+  const st = JSON.stringify((await mgr('GET', '/api/settings')).data) + JSON.stringify((await lena('GET', '/api/me')).data);
+  assert.ok(!/vapid/i.test(st));
+
+  // Rundruf: nur an Personen ohne Konflikt und ohne Abwesenheit, nicht an Eingetragene
+  const n2 = await shiftOn(day(21), 'N', 'Station 2');
+  await mgr('POST', `/api/shifts/${n2.id}/assign`, { user_id: users.twagner });
+  await mgr('POST', '/api/absences', { user_id: users.jschmitz, type: 'krank', from: day(21), to: day(21) });
+  assert.equal((await lena('POST', `/api/shifts/${n2.id}/rundruf`, {})).status, 403);
+  const r = await mgr('POST', `/api/shifts/${n2.id}/rundruf`, { note: 'Krankheitsausfall' });
+  const empf = r.data.empfaenger;
+  assert.ok(empf >= 1);
+  const tobias = await as('twagner');
+  assert.ok(!(await unread(tobias)).items.some((x) => x.art === 'rundruf'));       // schon eingetragen
+  assert.ok((await unread(lena)).items.some((x) => x.art === 'rundruf'));          // verfügbar
+  const julia = await as('jschmitz');
+  assert.ok(!(await unread(julia)).items.some((x) => x.art === 'rundruf'));        // krank
+  // nur mit Qualifikation
+  const r2 = await mgr('POST', `/api/shifts/${n2.id}/rundruf`, { qualification: 'Pflegehilfskraft' });
+  assert.ok(r2.data.empfaenger < empf);
+
+  // AU-Erinnerung: Krankmeldung über 5 Tage ab vor 6 Tagen ohne Bescheinigung → genau einmal erinnern
+  await mgr('POST', '/api/absences', { user_id: users.kschulz, type: 'krank', from: day(-6), to: day(-2) });
+  const first = (await mgr('POST', '/api/admin/run-reminders')).data.au;
+  assert.ok(first >= 1);
+  assert.equal((await mgr('POST', '/api/admin/run-reminders')).data.au, 0);
+  const kevin = await as('kschulz');
+  assert.ok((await unread(kevin)).items.some((x) => x.art === 'au'));
+});

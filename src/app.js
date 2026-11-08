@@ -70,6 +70,14 @@ function createApp(db, opts = {}) {
     return out;
   };
 
+  // Benachrichtigungen: wird vom Modul src/routes/30-benachrichtigungen.js gesetzt
+  const hooks = { notify: () => {} };
+  const shiftLabel = (shiftId) => {
+    const x = db.prepare(`SELECT s.date, s.start_time, s.end_time, st.name AS type_name, u.name AS unit_name FROM shifts s
+      JOIN shift_types st ON st.id = s.shift_type_id JOIN units u ON u.id = s.unit_id WHERE s.id = ?`).get(shiftId);
+    return x ? `${x.type_name} am ${x.date.split('-').reverse().join('.')} (${x.start_time}–${x.end_time}, ${x.unit_name})` : 'Dienst';
+  };
+  const managerIds = () => db.prepare("SELECT id FROM users WHERE active = 1 AND (role = 'manager' OR admin_rechte = 'voll' OR (admin_rechte = 'vertretung' AND admin_bis >= date('now')))").all().map((u) => u.id);
   const audit = (actorId, action, details) =>
     db.prepare('INSERT INTO audit_log (actor_id, action, details) VALUES (?, ?, ?)').run(actorId, action, JSON.stringify(details));
 
@@ -978,6 +986,7 @@ function createApp(db, opts = {}) {
 
     db.prepare('INSERT INTO assignments (shift_id, user_id, created_by) VALUES (?, ?, ?)').run(shift.id, userId, req.user.id);
     audit(req.user.id, 'assignment.add', { shift_id: shift.id, user_id: userId, force, reason });
+    if (userId !== req.user.id) hooks.notify([userId], { titel: 'Neuer Dienst', text: `Sie wurden eingetragen: ${shiftLabel(shift.id)}.`, link: '#mine', art: 'dienst' });
     return loadShifts('s.id = ?', [shift.id])[0];
   }));
 
@@ -1020,6 +1029,7 @@ function createApp(db, opts = {}) {
     }
     db.prepare('DELETE FROM assignments WHERE shift_id = ? AND user_id = ?').run(shift.id, userId);
     audit(req.user.id, 'assignment.remove', { shift_id: shift.id, user_id: userId, reason });
+    if (userId !== req.user.id) hooks.notify([userId], { titel: 'Dienst gestrichen', text: `Sie wurden ausgetragen: ${shiftLabel(shift.id)}${reason ? ` – ${reason}` : ''}.`, link: '#mine', art: 'dienst' });
     return loadShifts('s.id = ?', [shift.id])[0];
   }));
 
@@ -1057,6 +1067,7 @@ function createApp(db, opts = {}) {
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
     audit(req.user.id, 'assignment.move', { shift_id: to.id, from_shift_id: from.id, user_id: userId, von: from.unit_name, nach: to.unit_name, reason, force });
+    if (userId !== req.user.id) hooks.notify([userId], { titel: 'Station gewechselt', text: `Ihr Dienst wurde umgesetzt: ${from.unit_name} → ${to.unit_name}, ${shiftLabel(to.id)}.`, link: '#mine', art: 'dienst' });
     return loadShifts('s.id IN (?, ?)', [from.id, to.id]);
   }));
 
@@ -1198,6 +1209,15 @@ function createApp(db, opts = {}) {
       removed = removeAssignmentsInRange(userId, b.from, b.to, req.user.id, b.type === 'krank' ? 'Krankmeldung' : `${ABS_LABEL[b.type]} genehmigt`);
     }
     audit(req.user.id, 'absence.create', { id, user_id: userId, type: b.type, from: b.from, to: b.to, status, note, removed });
+    {
+      const zeitraum = `${b.from.split('-').reverse().join('.')} – ${b.to.split('-').reverse().join('.')}`;
+      if (userId === req.user.id) {
+        const was = b.type === 'krank' ? 'Krankmeldung' : `Antrag: ${ABS_LABEL[b.type]}`;
+        hooks.notify(managerIds().filter((x) => x !== userId), { titel: was, text: `${u.name}: ${zeitraum}${removed ? ` (${removed} Dienst(e) ausgetragen)` : ''}`, link: '#abwesenheiten', art: 'abwesenheit' });
+      } else {
+        hooks.notify([userId], { titel: `${ABS_LABEL[b.type]} eingetragen`, text: `Die Verwaltung hat für Sie eingetragen: ${zeitraum}.`, link: '#abwesenheit', art: 'abwesenheit' });
+      }
+    }
     const a = db.prepare('SELECT a.*, u.name FROM absences a JOIN users u ON u.id = a.user_id WHERE a.id = ?').get(id);
     return { ...decorateAbsence(a, settings), removed };
   }));
@@ -1216,6 +1236,8 @@ function createApp(db, opts = {}) {
       .run(status, note, req.user.id, new Date().toISOString(), a.id);
     const removed = status === 'genehmigt' ? removeAssignmentsInRange(a.user_id, a.from_date, a.to_date, req.user.id, `${ABS_LABEL[a.type]} genehmigt`) : 0;
     audit(req.user.id, 'absence.decide', { id: a.id, user_id: a.user_id, status, note, removed });
+    hooks.notify([a.user_id], { titel: `${ABS_LABEL[a.type]} ${status}`, art: 'abwesenheit', link: '#abwesenheit',
+      text: `${a.from_date.split('-').reverse().join('.')} – ${a.to_date.split('-').reverse().join('.')}${note ? `: ${note}` : ''}${removed ? ` · ${removed} Dienst(e) ausgetragen` : ''}` });
     const fresh = db.prepare('SELECT a.*, u.name FROM absences a JOIN users u ON u.id = a.user_id WHERE a.id = ?').get(a.id);
     return { ...decorateAbsence(fresh, settings), removed };
   }));
@@ -1395,8 +1417,8 @@ function createApp(db, opts = {}) {
   const ctx = {
     db, T, TOTP, HttpError, auth, manager, wrap, audit, getSettings, isoDate, isTime, nowLocalMs, todayIso,
     hasMgr, isHaupt, publicUser, loadShifts, loadRules, qualMissing, verbundGroup, checkConflicts, absenceOn, uploadDir, express,
+    hooks, shiftLabel, managerIds, decorateAbsence, timers: opts.timers !== false,
   };
-  ctx.hooks = { notify: () => {} }; // wird vom Benachrichtigungsmodul gesetzt
   for (const name of fs.readdirSync(path.join(__dirname, 'routes')).filter((f) => f.endsWith('.js')).sort()) {
     require(path.join(__dirname, 'routes', name))(app, ctx);
   }

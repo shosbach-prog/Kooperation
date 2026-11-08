@@ -195,7 +195,9 @@ function renderCell(s, staffUsers, compact = false) {
 
   const count = h('div', { class: 'count' },
     h('span', {}, `${n}/${s.max_staff ?? '∞'} · min ${s.min_staff}`),
-    isMgr() ? h('button', { class: 'tiny ghost', title: 'Besetzung/Notiz ändern', onclick: () => editShift(s) }, '✎') : null);
+    isMgr() ? h('span', { class: 'li-actions' },
+      s.unterbesetzt ? h('button', { class: 'tiny ghost', title: 'Rundruf: Personal benachrichtigen', 'aria-label': 'Rundruf senden', onclick: () => rundruf(s) }, '📣') : null,
+      h('button', { class: 'tiny ghost', title: 'Besetzung/Notiz ändern', 'aria-label': 'Besetzung oder Notiz ändern', onclick: () => editShift(s) }, '✎')) : null);
 
   let action = null;
   if (isMgr()) {
