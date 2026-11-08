@@ -28,6 +28,9 @@ const DEFAULT_SETTINGS = {
   au_ab_tag: 4,
   tausch_bestaetigung: false,
   wunsch_frist_tage: 14,
+  urlaub_uebertrag_bis: '03-31',
+  // Übertrag wird ab dem Folgejahr dieses Jahres automatisch berechnet (davor manuell)
+  urlaub_auto_ab_jahr: new Date().getFullYear(),
   wunsch_frei_max_monat: 4,
   max_std_tag: 10,
   max_std_woche: 48,
@@ -161,7 +164,7 @@ CREATE TABLE IF NOT EXISTS qual_rules (
 CREATE TABLE IF NOT EXISTS absences (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  type TEXT NOT NULL CHECK (type IN ('urlaub','zusatzurlaub','sonderurlaub','krank')),
+  type TEXT NOT NULL,
   from_date TEXT NOT NULL,
   to_date TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('beantragt','genehmigt','abgelehnt','gemeldet')),
@@ -234,6 +237,13 @@ CREATE TABLE IF NOT EXISTS wishes (
   note TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (user_id, date)
+);
+
+CREATE TABLE IF NOT EXISTS urlaub_uebertrag (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  jahr INTEGER NOT NULL,
+  tage REAL NOT NULL,
+  PRIMARY KEY (user_id, jahr)
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -334,7 +344,8 @@ function migrate(db) {
   add('units', 'verbund_id INTEGER REFERENCES verbuende(id) ON DELETE SET NULL');
   // Abwesenheitsarten erweitern (CHECK-Bedingung erfordert Neuaufbau der Tabelle)
   const absSql = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'absences'").get()?.sql || '';
-  if (!absSql.includes('zusatzurlaub')) {
+  // Abwesenheitsarten werden in der Anwendung geprüft; ältere Datenbanken haben eine CHECK-Bedingung → Tabelle neu aufbauen
+  if (absSql.includes('CHECK (type IN')) {
     db.exec('PRAGMA foreign_keys = OFF');
     db.exec('BEGIN');
     try {

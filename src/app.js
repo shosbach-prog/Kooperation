@@ -334,6 +334,7 @@ function createApp(db, opts = {}) {
       }
       if (k === 'akzentfarbe' && !/^#[0-9a-f]{6}$/i.test(String(v))) throw new HttpError(400, 'Farbe bitte als #RRGGBB angeben.');
       if (k === 'klinik_name' && !String(v).trim()) throw new HttpError(400, 'Name der Einrichtung fehlt.');
+      if (k === 'urlaub_uebertrag_bis' && !/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(String(v))) throw new HttpError(400, 'Übertrag bis: Format MM-TT, z. B. 03-31.');
       if (typeof def === 'string' && !Array.isArray(def)) { v = String(v).trim().slice(0, 120); if (k.startsWith('nacht_') && !isTime(v)) throw new HttpError(400, `Ungültige Uhrzeit für ${k}.`); }
       upd.run(k, JSON.stringify(v));
     }
@@ -1070,7 +1071,7 @@ function createApp(db, opts = {}) {
     }
     const abs = absenceOn(userId, shift.date);
     if (abs) {
-      const what = abs.type === 'krank' ? 'krankgemeldet' : abs.status === 'beantragt' ? 'mit beantragtem Urlaub eingetragen' : 'im Urlaub / freigestellt';
+      const what = GEMELDET.includes(abs.type) ? (abs.type === 'krank' ? 'krankgemeldet' : 'wegen Kind krank gemeldet') : abs.status === 'beantragt' ? 'mit beantragtem Urlaub eingetragen' : 'im Urlaub / freigestellt';
       throw new HttpError(409, `${isMgr ? target.name + ' ist' : 'Sie sind'} an diesem Tag ${what}.`, 'ABWESEND');
     }
     const count = db.prepare('SELECT COUNT(*) AS n FROM assignments WHERE shift_id = ?').get(shift.id).n;
@@ -1190,8 +1191,13 @@ function createApp(db, opts = {}) {
   }));
 
   // ---------- Urlaub und Krankheit ----------
-  const ABS_TYPES = ['urlaub', 'zusatzurlaub', 'sonderurlaub', 'krank'];
-  const ABS_LABEL = { urlaub: 'Erholungsurlaub', zusatzurlaub: 'Zusatzurlaub (Schwerbehinderung)', sonderurlaub: 'Sonderurlaub', krank: 'Krankheit' };
+  const ABS_TYPES = ['urlaub', 'zusatzurlaub', 'sonderurlaub', 'fortbildung', 'elternzeit', 'krank', 'kind_krank'];
+  const ABS_LABEL = { urlaub: 'Erholungsurlaub', zusatzurlaub: 'Zusatzurlaub (Schwerbehinderung)', sonderurlaub: 'Sonderurlaub', fortbildung: 'Fortbildung',
+    elternzeit: 'Elternzeit', krank: 'Krankheit', kind_krank: 'Kind krank' };
+  /** gemeldet statt beantragt (Krankheit des eigenen Kindes wie Krankheit) */
+  const GEMELDET = ['krank', 'kind_krank'];
+  /** Anrechnung im Zeitkonto: als Arbeitszeit (Entgeltfortzahlung) bzw. Soll-mindernd (unbezahlt) */
+  const ANRECHNUNG = { urlaub: 'arbeit', zusatzurlaub: 'arbeit', sonderurlaub: 'arbeit', fortbildung: 'arbeit', krank: 'arbeit', kind_krank: 'neutral', elternzeit: 'neutral' };
   const absenceDays = (a) => (T.parseDate(a.to_date) - T.parseDate(a.from_date)) / T.DAY + 1;
   const auRequired = (a, settings) => a.type === 'krank' && absenceDays(a) >= Number(settings.au_ab_tag || 1);
 
@@ -1229,8 +1235,51 @@ function createApp(db, opts = {}) {
     const genehmigt = sum('genehmigt');
     const beantragt = sum('beantragt');
     const anspruch = type === 'zusatzurlaub' ? (u.schwerbehindert ? u.zusatzurlaub_tage : 0) : u.urlaubstage_jahr;
-    return { jahr: year, anspruch, genehmigt, beantragt, rest: anspruch - genehmigt - beantragt };
+    // Resturlaub aus dem Vorjahr (TVöD § 26 Abs. 2): manuell erfasst oder ab urlaub_auto_ab_jahr automatisch
+    const st = getSettings();
+    let uebertrag = 0, quelle = '';
+    if (type === 'urlaub') {
+      const manuell = db.prepare('SELECT tage FROM urlaub_uebertrag WHERE user_id = ? AND jahr = ?').get(u.id, year);
+      if (manuell) { uebertrag = manuell.tage; quelle = 'manuell'; } else if (year - 1 >= Number(st.urlaub_auto_ab_jahr || 9999) && !excludeId) {
+        const vj = urlaubKonto(u, year - 1, type, -1);
+        uebertrag = Math.max(0, vj.anspruch + vj.uebertrag - vj.verfallen - vj.genehmigt);
+        quelle = 'automatisch';
+      }
+    }
+    const stichtag = `${year}-${st.urlaub_uebertrag_bis || '03-31'}`;
+    let verfallen = 0, genutzt = 0;
+    if (uebertrag > 0) {
+      // bis zum Stichtag genommener (genehmigter) Urlaub verbraucht zuerst den Übertrag
+      genutzt = db.prepare(`SELECT from_date, to_date FROM absences WHERE user_id = ? AND type = ? AND status = 'genehmigt'
+        AND from_date <= ? AND to_date >= ?`).all(u.id, type, stichtag, `${year}-01-01`)
+        .reduce((acc, a) => acc + T.arbeitstage(a.from_date < `${year}-01-01` ? `${year}-01-01` : a.from_date, a.to_date > stichtag ? stichtag : a.to_date), 0);
+      if (T.isoDate(nowLocalMs()) > stichtag) verfallen = Math.max(0, uebertrag - genutzt);
+    }
+    return {
+      jahr: year, anspruch, uebertrag, uebertrag_quelle: quelle, uebertrag_bis: stichtag, verfallen,
+      uebertrag_offen: Math.max(0, uebertrag - genutzt - verfallen),
+      genehmigt, beantragt, rest: anspruch + uebertrag - verfallen - genehmigt - beantragt,
+    };
   };
+
+  /** Übertrag aus dem Vorjahr manuell setzen (z. B. im Einführungsjahr oder bei verlängerter Frist) */
+  app.put('/api/users/:id/uebertrag', auth, manager, wrap((req) => {
+    const id = Number(req.params.id);
+    requireUser(req, id);
+    const jahr = Number(req.body?.jahr);
+    if (!Number.isInteger(jahr) || jahr < 2000 || jahr > 2100) throw new HttpError(400, 'Jahr ungültig.');
+    if (req.body.tage === null || req.body.tage === '') {
+      db.prepare('DELETE FROM urlaub_uebertrag WHERE user_id = ? AND jahr = ?').run(id, jahr);
+    } else {
+      const tage = Number(req.body.tage);
+      if (!Number.isFinite(tage) || tage < 0 || tage > 100) throw new HttpError(400, 'Tage ungültig.');
+      db.prepare(`INSERT INTO urlaub_uebertrag (user_id, jahr, tage) VALUES (?, ?, ?)
+        ON CONFLICT(user_id, jahr) DO UPDATE SET tage = excluded.tage`).run(id, jahr, tage);
+    }
+    audit(req.user.id, 'urlaub.uebertrag', { user_id: id, jahr, tage: req.body.tage });
+    const u = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    return urlaubKonto(u, jahr);
+  }));
 
   const loadAbsence = (req) => {
     const a = db.prepare('SELECT * FROM absences WHERE id = ?').get(Number(req.params.id));
@@ -1281,17 +1330,18 @@ function createApp(db, opts = {}) {
     if ((T.parseDate(b.to) - T.parseDate(b.from)) / T.DAY > 366) throw new HttpError(400, 'Zeitraum zu lang.');
     const today = T.isoDate(nowLocalMs());
     if (!isMgr) {
-      if (b.type !== 'krank' && b.from < today) throw new HttpError(400, 'Urlaub kann nicht rückwirkend beantragt werden.');
-      if (b.type === 'krank' && T.parseDate(today) - T.parseDate(b.from) > 14 * T.DAY) throw new HttpError(400, 'Krankmeldungen bitte innerhalb von 14 Tagen eintragen, sonst über die Einsatzplanung.');
+      if (!GEMELDET.includes(b.type) && b.from < today) throw new HttpError(400, 'Urlaub kann nicht rückwirkend beantragt werden.');
+      if (GEMELDET.includes(b.type) && T.parseDate(today) - T.parseDate(b.from) > 14 * T.DAY) throw new HttpError(400, 'Krankmeldungen bitte innerhalb von 14 Tagen eintragen, sonst über die Einsatzplanung.');
     }
     const overlap = db.prepare(`SELECT * FROM absences WHERE user_id = ? AND status IN ('beantragt','genehmigt','gemeldet')
       AND from_date <= ? AND to_date >= ?`).get(userId, b.to, b.from);
     if (overlap) throw new HttpError(409, `Im Zeitraum gibt es bereits einen Eintrag (${ABS_LABEL[overlap.type]} ${overlap.from_date} – ${overlap.to_date}).`, 'UEBERSCHNEIDUNG');
     const note = String(b.note || '').trim().slice(0, 500);
-    if (b.type !== 'krank') {
+    if (!GEMELDET.includes(b.type)) {
       const tage = T.arbeitstage(b.from, b.to);
       if (tage === 0) throw new HttpError(400, 'Im gewählten Zeitraum liegen keine Arbeitstage.');
       if (b.type === 'sonderurlaub' && note.length < 3) throw new HttpError(400, 'Bitte den Anlass des Sonderurlaubs angeben (z. B. Umzug, Hochzeit).', 'BEGRUENDUNG');
+      if (b.type === 'fortbildung' && note.length < 3) throw new HttpError(400, 'Bitte Thema bzw. Veranstaltung der Fortbildung angeben.', 'BEGRUENDUNG');
       if (!isMgr && (b.type === 'urlaub' || b.type === 'zusatzurlaub')) {
         if (b.from.slice(0, 4) !== b.to.slice(0, 4)) throw new HttpError(400, 'Bitte Urlaub über den Jahreswechsel in zwei Anträgen stellen.');
         const konto = urlaubKonto(u, Number(b.from.slice(0, 4)), b.type);
@@ -1301,19 +1351,19 @@ function createApp(db, opts = {}) {
       }
     }
     // Eigene Anträge von Verwalter/innen werden ebenfalls beantragt (Vier-Augen-Prinzip)
-    const status = b.type === 'krank' ? 'gemeldet' : (isMgr && userId !== req.user.id ? 'genehmigt' : 'beantragt');
+    const status = GEMELDET.includes(b.type) ? 'gemeldet' : (isMgr && userId !== req.user.id ? 'genehmigt' : 'beantragt');
     const id = db.prepare(`INSERT INTO absences (user_id, type, from_date, to_date, status, note, created_by, decided_by, decided_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(userId, b.type, b.from, b.to, status, note, req.user.id,
       status === 'genehmigt' ? req.user.id : null, status === 'genehmigt' ? new Date().toISOString() : null).lastInsertRowid;
     let removed = 0;
     if (status !== 'beantragt') {
-      removed = removeAssignmentsInRange(userId, b.from, b.to, req.user.id, b.type === 'krank' ? 'Krankmeldung' : `${ABS_LABEL[b.type]} genehmigt`);
+      removed = removeAssignmentsInRange(userId, b.from, b.to, req.user.id, GEMELDET.includes(b.type) ? ABS_LABEL[b.type] : `${ABS_LABEL[b.type]} genehmigt`);
     }
     audit(req.user.id, 'absence.create', { id, user_id: userId, type: b.type, from: b.from, to: b.to, status, note, removed });
     {
       const zeitraum = `${b.from.split('-').reverse().join('.')} – ${b.to.split('-').reverse().join('.')}`;
       if (userId === req.user.id) {
-        const was = b.type === 'krank' ? 'Krankmeldung' : `Antrag: ${ABS_LABEL[b.type]}`;
+        const was = GEMELDET.includes(b.type) ? (b.type === 'krank' ? 'Krankmeldung' : 'Kind krank') : `Antrag: ${ABS_LABEL[b.type]}`;
         hooks.notify(managerIds().filter((x) => x !== userId), { titel: was, text: `${u.name}: ${zeitraum}${removed ? ` (${removed} Dienst(e) ausgetragen)` : ''}`, link: '#abwesenheiten', art: 'abwesenheit' });
       } else {
         hooks.notify([userId], { titel: `${ABS_LABEL[b.type]} eingetragen`, text: `Die Verwaltung hat für Sie eingetragen: ${zeitraum}.`, link: '#abwesenheit', art: 'abwesenheit' });
@@ -1327,7 +1377,7 @@ function createApp(db, opts = {}) {
   app.put('/api/absences/:id/decision', auth, manager, wrap((req) => {
     const settings = getSettings();
     const a = loadAbsence(req);
-    if (a.type === 'krank') throw new HttpError(400, 'Krankmeldungen werden nicht genehmigt.');
+    if (GEMELDET.includes(a.type)) throw new HttpError(400, 'Krankmeldungen werden nicht genehmigt.');
     requireUser(req, a.user_id);
     if (a.user_id === req.user.id) throw new HttpError(403, 'Eigene Anträge muss eine andere Verwaltung genehmigen.');
     const status = req.body?.status;
@@ -1350,7 +1400,7 @@ function createApp(db, opts = {}) {
     const a = loadAbsence(req);
     const isMgr = hasMgr(req.user) && userInScope(req.user, a.user_id);
     if (!isMgr && a.user_id !== req.user.id) throw new HttpError(403, 'Diese Person gehört nicht zu Ihrem Verwaltungsbereich.', 'BEREICH');
-    if (!isMgr && a.type !== 'krank') throw new HttpError(403, 'Urlaubsanträge können nur zurückgezogen werden.');
+    if (!isMgr && !GEMELDET.includes(a.type)) throw new HttpError(403, 'Urlaubsanträge können nur zurückgezogen werden.');
     const to = req.body?.to;
     const from = isMgr && isoDate(req.body?.from) ? req.body.from : a.from_date;
     if (!isoDate(to) || to < from) throw new HttpError(400, 'Enddatum ungültig.');
@@ -1360,7 +1410,7 @@ function createApp(db, opts = {}) {
     db.prepare('UPDATE absences SET from_date = ?, to_date = ? WHERE id = ?').run(from, to, a.id);
     let removed = 0;
     if (a.status !== 'beantragt' && a.status !== 'abgelehnt') {
-      removed = removeAssignmentsInRange(a.user_id, from, to, req.user.id, a.type === 'krank' ? 'Krankmeldung verlängert' : 'Urlaub geändert');
+      removed = removeAssignmentsInRange(a.user_id, from, to, req.user.id, GEMELDET.includes(a.type) ? `${ABS_LABEL[a.type]} verlängert` : 'Urlaub geändert');
     }
     audit(req.user.id, 'absence.update', { id: a.id, user_id: a.user_id, from, to, removed });
     const fresh = db.prepare('SELECT a.*, u.name FROM absences a JOIN users u ON u.id = a.user_id WHERE a.id = ?').get(a.id);
@@ -1371,7 +1421,7 @@ function createApp(db, opts = {}) {
     const a = loadAbsence(req);
     const isMgr = hasMgr(req.user) && userInScope(req.user, a.user_id);
     if (!isMgr && a.user_id !== req.user.id) throw new HttpError(403, 'Diese Person gehört nicht zu Ihrem Verwaltungsbereich.', 'BEREICH');
-    if (!isMgr && !(a.type !== 'krank' && a.status === 'beantragt')) {
+    if (!isMgr && !(!GEMELDET.includes(a.type) && a.status === 'beantragt')) {
       throw new HttpError(403, 'Nur noch nicht entschiedene Urlaubsanträge können zurückgezogen werden. Bitte wenden Sie sich an die Einsatzplanung.');
     }
     for (const f of db.prepare('SELECT stored_name FROM attachments WHERE absence_id = ?').all(a.id)) {
@@ -1393,7 +1443,7 @@ function createApp(db, opts = {}) {
 
   app.post('/api/absences/:id/attachments', auth, express.raw({ type: () => true, limit: MAX_UPLOAD }), wrap((req) => {
     const a = loadAbsence(req);
-    if (a.type !== 'krank') throw new HttpError(400, 'Bescheinigungen können nur zu Krankmeldungen hochgeladen werden.');
+    if (!GEMELDET.includes(a.type)) throw new HttpError(400, 'Bescheinigungen können nur zu Krankmeldungen hochgeladen werden.');
     if (a.user_id !== req.user.id) requireUser(req, a.user_id);
     const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
     if (!buf.length) throw new HttpError(400, 'Keine Datei empfangen.');
@@ -1467,11 +1517,13 @@ function createApp(db, opts = {}) {
       // Urlaub (genehmigt) und Krankheit: je Arbeitstag 1/5 der Wochenarbeitszeit (§ 6 Abs. 3, § 21 TVöD, vereinfacht)
       const abs = db.prepare(`SELECT * FROM absences WHERE user_id = ? AND status IN ('genehmigt','gemeldet')
         AND from_date <= ? AND to_date >= ?`).all(u.id, to, from);
-      let urlaubTage = 0, sonderTage = 0, krankTage = 0, auFehlt = 0;
+      let urlaubTage = 0, sonderTage = 0, krankTage = 0, fortbildungTage = 0, neutralTage = 0, auFehlt = 0;
       for (const a of abs) {
         const tage = T.arbeitstage(a.from_date < from ? from : a.from_date, a.to_date > to ? to : a.to_date);
-        if (a.type === 'krank') krankTage += tage;
+        if (ANRECHNUNG[a.type] === 'neutral') neutralTage += tage; // Kind krank, Elternzeit: unbezahlt, Soll sinkt
+        else if (a.type === 'krank') krankTage += tage;
         else if (a.type === 'sonderurlaub') sonderTage += tage;
+        else if (a.type === 'fortbildung') fortbildungTage += tage;
         else urlaubTage += tage; // Erholungs- und Zusatzurlaub
         if (auRequired(a, settings) && !db.prepare('SELECT 1 FROM attachments WHERE absence_id = ?').get(a.id)) auFehlt++;
       }
@@ -1479,8 +1531,9 @@ function createApp(db, opts = {}) {
       const urlaubStd = urlaubTage * perDay;
       const krankStd = krankTage * perDay;
       const sonderStd = sonderTage * perDay;
-      const ist = sum.stunden + urlaubStd + krankStd + sonderStd;
-      const soll = T.sollStunden(y, m, u.weekly_hours);
+      const fortbildungStd = fortbildungTage * perDay;
+      const ist = sum.stunden + urlaubStd + krankStd + sonderStd + fortbildungStd;
+      const soll = Math.max(0, T.sollStunden(y, m, u.weekly_hours) - neutralTage * perDay);
       // Zulagen nach TVöD § 8 Abs. 5/6 (vereinfacht): Wechselschicht = mind. x Nachtschichten im Monat und wechselnde Dienste;
       // Schichtarbeit = Dienste mit unterschiedlichen Anfangszeiten
       let zulage = '', zulageEur = 0;
@@ -1494,7 +1547,8 @@ function createApp(db, opts = {}) {
         user_id: u.id, name: u.name, qualification: u.qualification, weekly_hours: u.weekly_hours,
         min_hours_month: u.min_hours_month, dienste: shifts.length, nachtschichten,
         gearbeitet: r2(sum.stunden), urlaub_tage: urlaubTage, urlaub_std: r2(urlaubStd), krank_tage: krankTage, krank_std: r2(krankStd),
-        sonder_tage: sonderTage, sonder_std: r2(sonderStd), au_fehlt: auFehlt, soll: r2(soll), ist: r2(ist), saldo: r2(ist - soll),
+        sonder_tage: sonderTage, sonder_std: r2(sonderStd), fortbildung_tage: fortbildungTage, fortbildung_std: r2(fortbildungStd),
+        unbezahlt_tage: neutralTage, au_fehlt: auFehlt, soll: r2(soll), ist: r2(ist), saldo: r2(ist - soll),
         nacht: r2(sum.nacht), samstag: r2(sum.samstag), sonntag: r2(sum.sonntag), feiertag: r2(sum.feiertag), vorfest: r2(sum.vorfest),
         zuschlag_eur: r2(euro), min_erfuellt: ist + 1e-9 >= (u.min_hours_month || 0),
       };

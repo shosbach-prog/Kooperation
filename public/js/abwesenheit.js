@@ -6,7 +6,11 @@ const STATUS = {
   beantragt: ['warn', 'beantragt'], genehmigt: ['ok', 'genehmigt'], abgelehnt: ['bad', 'abgelehnt'], gemeldet: ['warn', 'krankgemeldet'],
 };
 const statusBadge = (a) => h('span', { class: `badge ${STATUS[a.status][0]}` }, STATUS[a.status][1]);
-const ABS_LABEL = { urlaub: 'Erholungsurlaub', zusatzurlaub: 'Zusatzurlaub (Schwerbehinderung)', sonderurlaub: 'Sonderurlaub', krank: 'Krankheit' };
+const ABS_LABEL = { urlaub: 'Erholungsurlaub', zusatzurlaub: 'Zusatzurlaub (Schwerbehinderung)', sonderurlaub: 'Sonderurlaub', fortbildung: 'Fortbildung',
+  elternzeit: 'Elternzeit', krank: 'Krankheit', kind_krank: 'Kind krank' };
+/** Arten, die gemeldet (nicht beantragt) werden */
+const GEMELDET = ['krank', 'kind_krank'];
+const isGemeldet = (t) => GEMELDET.includes(typeof t === 'string' ? t : t.type);
 const typeLabel = (a) => ABS_LABEL[a.type] || a.type;
 const range = (a) => (a.from_date === a.to_date ? fmtDate(a.from_date) : `${fmtDate(a.from_date)} – ${fmtDate(a.to_date)}`);
 const fmtSize = (b) => (b > 1024 * 1024 ? `${fmtNum(b / 1024 / 1024, 1)} MB` : `${Math.ceil(b / 1024)} KB`);
@@ -45,7 +49,7 @@ function uploadButton(a) {
       refresh();
     } catch (e) { toast(e.message, true); }
   });
-  return h('span', {}, input, h('button', { class: 'tiny', onclick: () => input.click() }, 'AU hochladen'));
+  return h('span', {}, input, h('button', { class: 'tiny', onclick: () => input.click() }, a.type === 'kind_krank' ? 'Bescheinigung hochladen' : 'AU hochladen'));
 }
 
 async function extendSickness(a) {
@@ -66,11 +70,15 @@ function absenceForm(type, onSaved, users) {
     users.map((u) => h('option', { value: u.id }, u.name))) : null;
   let typeSel = null;
   if (users) {
-    typeSel = h('select', {}, ['urlaub', 'zusatzurlaub', 'sonderurlaub', 'krank'].map((t) => h('option', { value: t }, ABS_LABEL[t])));
-  } else if (type !== 'krank') {
+    typeSel = h('select', {}, Object.keys(ABS_LABEL).map((t) => h('option', { value: t }, ABS_LABEL[t])));
+  } else if (type === 'krank') {
+    typeSel = h('select', {}, h('option', { value: 'krank' }, 'Ich bin krank'), h('option', { value: 'kind_krank' }, 'Mein Kind ist krank (§ 45 SGB V)'));
+  } else {
     typeSel = h('select', {}, h('option', { value: 'urlaub' }, ABS_LABEL.urlaub),
       state.me.schwerbehindert ? h('option', { value: 'zusatzurlaub' }, ABS_LABEL.zusatzurlaub) : null,
-      h('option', { value: 'sonderurlaub' }, 'Sonderurlaub (Arbeitsbefreiung)'));
+      h('option', { value: 'sonderurlaub' }, 'Sonderurlaub (Arbeitsbefreiung)'),
+      h('option', { value: 'fortbildung' }, 'Fortbildung'),
+      h('option', { value: 'elternzeit' }, 'Elternzeit'));
   }
   const from = h('input', { type: 'date', required: true, value: type === 'krank' ? today : '' });
   const to = h('input', { type: 'date', required: true, value: type === 'krank' ? today : '' });
@@ -78,10 +86,11 @@ function absenceForm(type, onSaved, users) {
   const note = h('input', { placeholder: type === 'krank' ? 'optional' : 'optional, z. B. Familienurlaub', maxlength: 500 });
   const noteLabel = h('span', {}, 'Bemerkung');
   typeSel?.addEventListener('change', () => {
-    const sonder = typeSel.value === 'sonderurlaub';
-    noteLabel.textContent = sonder ? 'Anlass (Pflicht)' : 'Bemerkung';
-    note.placeholder = sonder ? 'z. B. Umzug, Hochzeit, Niederkunft der Partnerin' : 'optional';
-    note.required = sonder;
+    const v = typeSel.value;
+    const pflicht = v === 'sonderurlaub' || v === 'fortbildung';
+    noteLabel.textContent = v === 'sonderurlaub' ? 'Anlass (Pflicht)' : v === 'fortbildung' ? 'Thema / Veranstaltung (Pflicht)' : 'Bemerkung';
+    note.placeholder = v === 'sonderurlaub' ? 'z. B. Umzug, Hochzeit, Niederkunft der Partnerin' : v === 'fortbildung' ? 'z. B. Deeskalationstraining, Fachtagung' : 'optional';
+    note.required = pflicht;
   });
   const form = h('form', { class: 'row' },
     userSel ? h('label', {}, 'Mitarbeiter/in', userSel) : null, typeSel ? h('label', {}, 'Art', typeSel) : null,
@@ -94,7 +103,7 @@ function absenceForm(type, onSaved, users) {
     const t = typeSel ? typeSel.value : type;
     try {
       const r = await api('POST', 'api/absences', { type: t, from: from.value, to: to.value, note: note.value, user_id: userSel?.value || undefined });
-      let msg = t === 'krank' ? 'Krankmeldung gespeichert.' : users ? `${ABS_LABEL[t]} eingetragen.` : `Antrag (${ABS_LABEL[t]}) über ${r.arbeitstage} Arbeitstage gestellt.`;
+      let msg = isGemeldet(t) ? `${ABS_LABEL[t]} gemeldet.` : users ? `${ABS_LABEL[t]} eingetragen.` : `Antrag (${ABS_LABEL[t]}) über ${r.arbeitstage} Arbeitstage gestellt.`;
       if (r.removed) msg += ` ${r.removed} Dienst(e) wurden ausgetragen.`;
       toast(msg);
       if (t === 'krank' && r.au_erforderlich && !users) {
@@ -114,7 +123,9 @@ async function renderMyAbsences() {
     return h('div', { class: 'card' }, h('h2', {}, `${title} ${k.jahr}`),
       h('div', { class: 'stat' }, `${fmtNum(k.rest, 1)} Tage übrig`),
       h('div', { class: 'progress' }, h('div', { style: { width: pct + '%' } })),
-      h('p', { class: 'small muted' }, `Anspruch ${fmtNum(k.anspruch, 1)} · genehmigt ${k.genehmigt} · beantragt ${k.beantragt} (Arbeitstage)`),
+      h('p', { class: 'small muted' }, `Anspruch ${fmtNum(k.anspruch, 1)}${k.uebertrag ? ` + Übertrag ${fmtNum(k.uebertrag, 1)}` : ''} · genehmigt ${k.genehmigt} · beantragt ${k.beantragt} (Arbeitstage)`),
+      k.uebertrag_offen > 0 ? h('p', { class: 'small' }, h('span', { class: 'badge warn' }, `${fmtNum(k.uebertrag_offen, 1)} Tage Resturlaub verfallen am ${fmtDate(k.uebertrag_bis)}`)) : null,
+      k.verfallen > 0 ? h('p', { class: 'small muted' }, `${fmtNum(k.verfallen, 1)} Tage Resturlaub aus dem Vorjahr sind verfallen.`) : null,
       hint ? h('p', { class: 'small muted' }, hint) : null);
   };
   setMain(
@@ -134,14 +145,14 @@ async function renderMyAbsences() {
         h('thead', {}, h('tr', {}, ['Art', 'Zeitraum', 'Tage', 'Status', 'Bemerkung', 'Bescheinigung', ''].map((x) => h('th', {}, x)))),
         h('tbody', {}, r.absences.map((a) => h('tr', {},
           h('td', {}, typeLabel(a)), h('td', {}, range(a)),
-          h('td', { class: 'num' }, a.type !== 'krank' ? `${a.arbeitstage} AT` : `${a.kalendertage} KT`),
+          h('td', { class: 'num' }, !isGemeldet(a) ? `${a.arbeitstage} AT` : `${a.kalendertage} KT`),
           h('td', {}, statusBadge(a)),
           h('td', {}, a.note, a.decision_note ? h('div', { class: 'small muted' }, `Einsatzplanung: ${a.decision_note}`) : null),
           h('td', {}, auStatus(a), attachmentList(a, true)),
           h('td', { class: 'actions' },
-            a.type === 'krank' ? uploadButton(a) : null,
-            a.type === 'krank' ? h('button', { class: 'tiny ghost', onclick: () => extendSickness(a) }, 'Verlängern') : null,
-            a.type !== 'krank' && a.status === 'beantragt' ? h('button', { class: 'tiny danger', onclick: async () => {
+            isGemeldet(a) ? uploadButton(a) : null,
+            isGemeldet(a) ? h('button', { class: 'tiny ghost', onclick: () => extendSickness(a) }, 'Verlängern') : null,
+            !isGemeldet(a) && a.status === 'beantragt' ? h('button', { class: 'tiny danger', onclick: async () => {
               if (!await uiConfirm('Der Antrag wird gelöscht.', { title: 'Antrag zurückziehen?', okText: 'Zurückziehen', danger: true })) return;
               try { await api('DELETE', `api/absences/${a.id}`); toast('Zurückgezogen.'); renderMyAbsences(); } catch (e) { toast(e.message, true); }
             } }, 'Zurückziehen') : null))))))
@@ -174,8 +185,8 @@ async function renderAbsencesMgr() {
     } catch (e) { toast(e.message, true); }
     refresh();
   };
-  const sick = inMonth.absences.filter((a) => a.type === 'krank');
-  const vac = inMonth.absences.filter((a) => a.type !== 'krank' && a.status !== 'beantragt');
+  const sick = inMonth.absences.filter((a) => isGemeldet(a));
+  const vac = inMonth.absences.filter((a) => !isGemeldet(a) && a.status !== 'beantragt');
   const auMissing = (await api('GET', 'api/absences')).absences.filter((a) => a.au_ueberfaellig);
   setMain(
     h('div', { class: 'card' }, h('h2', {}, `Offene Anträge (${open.absences.length})`),

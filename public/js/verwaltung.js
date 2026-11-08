@@ -140,6 +140,7 @@ async function renderSettings() {
     ['zulage_wechselschicht_eur', 'Wechselschichtzulage pro Monat (€)', 'number', 'TVöD § 8 Abs. 5 – Betrag bitte mit aktuellem Tarif abgleichen'],
     ['wechselschicht_min_naechte', 'Wechselschicht ab … Nachtschichten im Monat', 'number', 'TVöD § 7 Abs. 1: mind. 2 Nachtschichten'],
     ['zulage_schicht_eur', 'Schichtzulage pro Monat (€)', 'number', 'TVöD § 8 Abs. 6 – Betrag bitte mit aktuellem Tarif abgleichen'],
+    ['urlaub_uebertrag_bis', 'Resturlaub aus dem Vorjahr verfällt am (MM-TT)', 'text', 'TVöD § 26 Abs. 2: 03-31 (in Ausnahmefällen 05-31)'],
     ['wunsch_frist_tage', 'Dienstwünsche möglich ab … Tagen im Voraus', 'number', 'z. B. 14: Wünsche für die nächsten zwei Wochen sind gesperrt.'],
     ['wunsch_frei_max_monat', 'Höchstzahl „Wunsch frei“ pro Person und Monat', 'number', '0 = unbegrenzt'],
     ['tausch_bestaetigung', 'Diensttausch muss von der Verwaltung bestätigt werden', 'checkbox', 'Ohne Haken ist eine Übernahme aus der Tauschbörse sofort wirksam.'],

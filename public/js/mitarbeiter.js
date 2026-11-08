@@ -48,7 +48,8 @@ function monthToolbar(rerender) {
 function zuschlagTable(rows, withName) {
   const cols = [
     ...(withName ? [['name', 'Name', false], ['qualification', 'Qualifikation', false]] : []),
-    ['soll', 'Soll', true], ['gearbeitet', 'Gearbeitet', true], ['urlaub_std', 'Urlaub', true], ['sonder_std', 'Sonderurlaub', true], ['krank_std', 'Krank', true],
+    ['soll', 'Soll', true], ['gearbeitet', 'Gearbeitet', true], ['urlaub_std', 'Urlaub', true], ['sonder_std', 'Sonderurlaub', true], ['fortbildung_std', 'Fortbildung', true], ['krank_std', 'Krank', true],
+    ['unbezahlt_tage', 'unbezahlt (Tage)', true, 0],
     ['ist', 'Ist gesamt', true], ['saldo', 'Saldo', true],
     ...(withName ? [['min_hours_month', 'Mindest-Std.', true]] : []),
     ['dienste', 'Dienste', true, 0], ['nachtschichten', 'Nachtschichten', true, 0],

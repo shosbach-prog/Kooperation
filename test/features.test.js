@@ -436,3 +436,48 @@ test('Automatischer Planvorschlag: Vorschau, Regeln, Fairness, Übernahme', asyn
   const c = await as(uname);
   assert.ok((await c('GET', '/api/notifications')).data.items.some((n) => n.titel === 'Neue Dienste eingeplant'));
 });
+
+test('Weitere Abwesenheitsarten und Resturlaub-Übertrag', async () => {
+  const lena = await as('lhoffmann');
+  // Fortbildung: Thema Pflicht, wird beantragt und zählt als Arbeitszeit
+  const mo = (() => { for (let i = 200; ; i++) { const x = new Date(day(i)); if (x.getUTCDay() === 1 && x.getUTCDate() <= 20) return day(i); } })();
+  assert.equal((await lena('POST', '/api/absences', { type: 'fortbildung', from: mo, to: mo })).data.code, 'BEGRUENDUNG');
+  const fb = (await lena('POST', '/api/absences', { type: 'fortbildung', from: mo, to: mo, note: 'Deeskalationstraining' })).data;
+  assert.equal(fb.status, 'beantragt');
+  await mgr('PUT', `/api/absences/${fb.id}/decision`, { status: 'genehmigt' });
+  // Kind krank: gemeldet wie Krankheit, Soll sinkt statt Gutschrift
+  const di = new Date(Date.parse(mo) + 86400000).toISOString().slice(0, 10);
+  const kk = (await mgr('POST', '/api/absences', { user_id: users.lhoffmann, type: 'kind_krank', from: di, to: di })).data;
+  assert.equal(kk.status, 'gemeldet');
+  assert.equal((await mgr('PUT', `/api/absences/${kk.id}/decision`, { status: 'genehmigt' })).status, 400);
+  const row = (await mgr('GET', `/api/report?month=${mo.slice(0, 7)}`)).data.rows.find((x) => x.user_id === users.lhoffmann);
+  const perDay = 19.25 / 5;
+  assert.equal(row.fortbildung_tage, 1);
+  assert.ok(Math.abs(row.fortbildung_std - perDay) < 0.01);
+  assert.equal(row.unbezahlt_tage, 1);
+  // Elternzeit unbekannter Typ → Fehler; Elternzeit gültig
+  assert.equal((await lena('POST', '/api/absences', { type: 'quatsch', from: mo, to: mo })).status, 400);
+
+  // Übertrag: manuell im Einführungsjahr, automatisch im Folgejahr
+  const jahr = new Date().getUTCFullYear();
+  let r = await mgr('PUT', `/api/users/${users.lhoffmann}/uebertrag`, { jahr, tage: 7 });
+  assert.equal(r.data.uebertrag, 7);
+  assert.equal(r.data.uebertrag_quelle, 'manuell');
+  const k = (await lena('GET', `/api/absences?year=${jahr}&mine=1`)).data.urlaub;
+  assert.equal(k.uebertrag, 7);
+  assert.equal(k.uebertrag_bis, `${jahr}-03-31`);
+  // nach dem 31.03. ist nicht genutzter Übertrag verfallen (im laufenden Jahr, falls Stichtag vorbei)
+  if (new Date().toISOString().slice(0, 10) > `${jahr}-03-31`) assert.equal(k.verfallen, 7);
+  // Folgejahr automatisch: Rest dieses Jahres (Anspruch + nicht verfallener Übertrag − genehmigt)
+  const next = (await lena('GET', `/api/absences?year=${jahr + 1}&mine=1`)).data.urlaub;
+  assert.equal(next.uebertrag_quelle, 'automatisch');
+  assert.equal(next.uebertrag, k.anspruch + k.uebertrag - k.verfallen - k.genehmigt);
+  // manuellen Wert entfernen
+  r = await mgr('PUT', `/api/users/${users.lhoffmann}/uebertrag`, { jahr, tage: null });
+  assert.equal(r.data.uebertrag_quelle, '');
+  assert.equal((await lena('PUT', `/api/users/${users.lhoffmann}/uebertrag`, { jahr, tage: 30 })).status, 403);
+  // Stichtag einstellbar, Format geprüft
+  assert.equal((await mgr('PUT', '/api/settings', { urlaub_uebertrag_bis: '31.03.' })).status, 400);
+  assert.equal((await mgr('PUT', '/api/settings', { urlaub_uebertrag_bis: '05-31' })).status, 200);
+  await mgr('PUT', '/api/settings', { urlaub_uebertrag_bis: '03-31' });
+});

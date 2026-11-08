@@ -384,7 +384,10 @@ test('Zusatzurlaub bei Schwerbehinderung (§ 208 SGB IX) und Sonderurlaub', asyn
   // Erholungsurlaub ist davon unabhängig
   r = await julia('GET', `/api/absences?year=${year}`);
   assert.equal(r.data.zusatzurlaub.rest, 0);
-  assert.equal(r.data.urlaub.rest, 30);
+  // Resturlaub des laufenden Jahres (30 Tage, nichts genommen) wird ins Folgejahr übertragen
+  assert.equal(r.data.urlaub.uebertrag, 30);
+  assert.equal(r.data.urlaub.uebertrag_quelle, 'automatisch');
+  assert.equal(r.data.urlaub.rest, 60);
 
   // Sonderurlaub braucht einen Anlass
   r = await julia('POST', '/api/absences', { type: 'sonderurlaub', from: nextMon, to: nextMon });

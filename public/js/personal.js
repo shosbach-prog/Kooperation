@@ -123,7 +123,17 @@ async function renderPersonalakte(id) {
   const kontoCard = abs.urlaub ? h('div', { class: 'card' }, h('h3', { style: { marginTop: 0 } }, `Urlaub ${year}`),
     h('div', { class: 'stat' }, `${fmtNum(abs.urlaub.rest, 1)} Tage übrig`),
     h('p', { class: 'small muted' }, `Anspruch ${fmtNum(abs.urlaub.anspruch, 1)} · genehmigt ${abs.urlaub.genehmigt} · beantragt ${abs.urlaub.beantragt}`),
-    abs.zusatzurlaub ? h('p', { class: 'small' }, `Zusatzurlaub: ${fmtNum(abs.zusatzurlaub.rest, 1)} von ${fmtNum(abs.zusatzurlaub.anspruch, 1)} Tagen übrig`) : null) : null;
+    abs.zusatzurlaub ? h('p', { class: 'small' }, `Zusatzurlaub: ${fmtNum(abs.zusatzurlaub.rest, 1)} von ${fmtNum(abs.zusatzurlaub.anspruch, 1)} Tagen übrig`) : null,
+    h('p', { class: 'small' }, `Übertrag aus ${year - 1}: ${fmtNum(abs.urlaub.uebertrag, 1)} Tage`,
+      abs.urlaub.uebertrag_quelle ? h('span', { class: 'muted' }, ` (${abs.urlaub.uebertrag_quelle}, verfällt am ${fmtDate(abs.urlaub.uebertrag_bis)})`) : null,
+      abs.urlaub.verfallen ? h('span', { class: 'muted' }, ` · ${fmtNum(abs.urlaub.verfallen, 1)} verfallen`) : null),
+    h('button', { class: 'tiny ghost', onclick: async () => {
+      const r = await uiForm({ title: `Resturlaub aus ${year - 1}`, message: `${u.name} – wird ins Jahr ${year} übertragen.`, okText: 'Speichern',
+        fields: [{ name: 'tage', label: 'Übertrag (Tage)', type: 'number', min: 0, step: 0.5, value: abs.urlaub.uebertrag_quelle === 'manuell' ? abs.urlaub.uebertrag : '',
+          hint: 'Leer lassen = automatisch berechnen (ab dem 2. Jahr der Nutzung).' }] });
+      if (!r) return;
+      try { await api('PUT', `api/users/${u.id}/uebertrag`, { jahr: year, tage: r.tage === '' ? null : Number(r.tage) }); toast('Gespeichert.'); renderPersonalakte(u.id); } catch (e) { toast(e.message, true); }
+    } }, 'Übertrag festlegen')) : null;
   const zeitCard = r ? h('div', { class: 'card' }, h('h3', { style: { marginTop: 0 } }, `Zeitkonto ${todayIso().slice(5, 7)}/${year}`),
     h('div', { class: 'stat' }, `${fmtNum(r.ist)} / ${fmtNum(r.soll)} Std.`),
     h('p', { class: 'small muted' }, `Saldo ${fmtNum(r.saldo)} Std. · ${r.dienste} Dienste · ${r.nachtschichten} Nachtschichten`),
@@ -144,7 +154,7 @@ async function renderPersonalakte(id) {
       h('thead', {}, h('tr', {}, ['Art', 'Zeitraum', 'Tage', 'Status', 'AU'].map((x) => h('th', {}, x)))),
       h('tbody', {}, abs.absences.slice(0, 30).map((a) => h('tr', {},
         h('td', {}, typeLabel(a)), h('td', {}, range(a)),
-        h('td', { class: 'num' }, a.type !== 'krank' ? `${a.arbeitstage} AT` : `${a.kalendertage} KT`),
+        h('td', { class: 'num' }, !isGemeldet(a) ? `${a.arbeitstage} AT` : `${a.kalendertage} KT`),
         h('td', {}, statusBadge(a)), h('td', {}, auStatus(a) || '–'))))))
       : h('p', { class: 'muted' }, 'Keine Einträge.'));
 

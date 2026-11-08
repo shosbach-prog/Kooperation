@@ -169,7 +169,8 @@ function absentOn(date) {
 }
 function absLabel(a) {
   if (a.type === 'krank') return 'krank';
-  const t = a.type === 'sonderurlaub' ? 'Sonderurlaub' : 'Urlaub';
+  if (a.type === 'kind_krank') return 'Kind krank';
+  const t = { sonderurlaub: 'Sonderurlaub', fortbildung: 'Fortbildung', elternzeit: 'Elternzeit' }[a.type] || 'Urlaub';
   return a.status === 'beantragt' ? `${t} beantragt` : t;
 }
 
