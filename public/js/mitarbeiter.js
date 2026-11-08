@@ -53,7 +53,7 @@ function zuschlagTable(rows, withName) {
     ...(withName ? [['min_hours_month', 'Mindest-Std.', true]] : []),
     ['dienste', 'Dienste', true, 0], ['nachtschichten', 'Nachtschichten', true, 0],
     ['nacht', 'Nacht', true], ['samstag', 'Samstag', true], ['sonntag', 'Sonntag', true], ['feiertag', 'Feiertag', true], ['vorfest', '24./31.12.', true],
-    ['zuschlag_eur', 'Zuschläge €', true],
+    ['zuschlag_eur', 'Zuschläge €', true], ['zulage', 'Zulage', false], ['zulage_eur', 'Zulage €', true],
   ];
   return h('div', { class: 'table-wrap' }, h('h3', {}, 'Stunden und Zeitzuschläge'),
     h('table', { class: withName ? 'sticky-first' : '' },

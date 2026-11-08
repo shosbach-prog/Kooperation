@@ -29,6 +29,13 @@ const DEFAULT_SETTINGS = {
   tausch_bestaetigung: false,
   wunsch_frist_tage: 14,
   wunsch_frei_max_monat: 4,
+  max_std_tag: 10,
+  max_std_woche: 48,
+  max_naechte_folge: 5,
+  max_tage_folge: 6,
+  zulage_wechselschicht_eur: 155,
+  zulage_schicht_eur: 40,
+  wechselschicht_min_naechte: 2,
 };
 
 function hashPassword(pw) {

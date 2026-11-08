@@ -999,6 +999,53 @@ function createApp(db, opts = {}) {
     return null;
   };
 
+  /**
+   * Arbeitszeitregeln (ArbZG § 3, § 6; Hausregeln): Tages- und Wochenhöchstarbeitszeit,
+   * Nachtdienste und Arbeitstage in Folge. Liefert eine Liste von Verstößen (leer = in Ordnung).
+   */
+  const arbzgCheck = (shift, userId, settings, extraShifts = []) => {
+    const out = [];
+    const lo = T.isoDate(T.parseDate(shift.date) - 31 * T.DAY), hi = T.isoDate(T.parseDate(shift.date) + 31 * T.DAY);
+    const own = db.prepare(`SELECT s.* FROM shifts s JOIN assignments a ON a.shift_id = s.id
+      WHERE a.user_id = ? AND s.id <> ? AND s.date BETWEEN ? AND ?`).all(userId, shift.id, lo, hi)
+      .concat(extraShifts.filter((x) => x.id !== shift.id));
+    const all = [...own, shift];
+    const hours = (x) => T.shiftHours(x);
+    const fmtH = (x) => String(Math.round(x * 10) / 10).replace('.', ',');
+    const maxTag = Number(settings.max_std_tag) || 0;
+    if (maxTag) {
+      const sum = all.filter((x) => x.date === shift.date).reduce((a, x) => a + hours(x), 0);
+      if (sum > maxTag + 1e-9) out.push({ code: 'TAG', message: `Mehr als ${maxTag} Std. Arbeitszeit am ${shift.date.split('-').reverse().join('.')} (${fmtH(sum)} Std.).` });
+    }
+    const maxWoche = Number(settings.max_std_woche) || 0;
+    if (maxWoche) {
+      const t0 = T.parseDate(shift.date);
+      const mon = T.isoDate(t0 - ((new Date(t0).getUTCDay() + 6) % 7) * T.DAY), sun = T.isoDate(T.parseDate(mon) + 6 * T.DAY);
+      const sum = all.filter((x) => x.date >= mon && x.date <= sun).reduce((a, x) => a + hours(x), 0);
+      if (sum > maxWoche + 1e-9) out.push({ code: 'WOCHE', message: `Mehr als ${maxWoche} Std. in der Woche ab ${mon.split('-').reverse().join('.')} (${fmtH(sum)} Std.).` });
+    }
+    const run = (pred) => {
+      // längste Folge aufeinanderfolgender Tage (mit pred), die das Datum der neuen Schicht enthält
+      const days = new Set(all.filter(pred).map((x) => x.date));
+      if (!days.has(shift.date)) return 0;
+      let n = 1;
+      for (let t = T.parseDate(shift.date) - T.DAY; days.has(T.isoDate(t)); t -= T.DAY) n++;
+      for (let t = T.parseDate(shift.date) + T.DAY; days.has(T.isoDate(t)); t += T.DAY) n++;
+      return n;
+    };
+    const maxN = Number(settings.max_naechte_folge) || 0;
+    if (maxN) {
+      const n = run((x) => T.breakdown(x, settings).nachtschicht);
+      if (n > maxN) out.push({ code: 'NAECHTE', message: `${n} Nachtdienste in Folge (höchstens ${maxN}).` });
+    }
+    const maxT = Number(settings.max_tage_folge) || 0;
+    if (maxT) {
+      const n = run(() => true);
+      if (n > maxT) out.push({ code: 'TAGE', message: `${n} Arbeitstage in Folge (höchstens ${maxT}).` });
+    }
+    return out;
+  };
+
   const readReason = (req, required) => {
     const reason = String(req.body?.reason || '').trim().slice(0, 500);
     if (required && reason.length < 3) throw new HttpError(400, 'Bitte geben Sie eine Begründung an.', 'BEGRUENDUNG');
@@ -1032,6 +1079,8 @@ function createApp(db, opts = {}) {
     }
     const conflict = checkConflicts(shift, userId, settings);
     if (conflict && (conflict.code === 'UEBERSCHNEIDUNG' || !force)) throw new HttpError(409, conflict.message, conflict.code);
+    const regeln = arbzgCheck(shift, userId, settings);
+    if (regeln.length && !force) throw new HttpError(409, `Arbeitszeitregel: ${regeln.map((x) => x.message).join(' ')}`, 'ARBZG');
 
     db.prepare('INSERT INTO assignments (shift_id, user_id, created_by) VALUES (?, ?, ?)').run(shift.id, userId, req.user.id);
     audit(req.user.id, 'assignment.add', { shift_id: shift.id, user_id: userId, force, reason });
@@ -1407,7 +1456,9 @@ function createApp(db, opts = {}) {
         WHERE a.user_id = ? AND s.date BETWEEN ? AND ?`).all(u.id, from, to);
       const sum = { stunden: 0, nacht: 0, samstag: 0, sonntag: 0, feiertag: 0, vorfest: 0 };
       let nachtschichten = 0, euro = 0;
+      const beginne = new Set();
       for (const s of shifts) {
+        beginne.add(s.start_time);
         const b = T.breakdown(s, settings);
         for (const k of Object.keys(sum)) sum[k] += b[k];
         if (b.nachtschicht) nachtschichten++;
@@ -1430,7 +1481,16 @@ function createApp(db, opts = {}) {
       const sonderStd = sonderTage * perDay;
       const ist = sum.stunden + urlaubStd + krankStd + sonderStd;
       const soll = T.sollStunden(y, m, u.weekly_hours);
+      // Zulagen nach TVöD § 8 Abs. 5/6 (vereinfacht): Wechselschicht = mind. x Nachtschichten im Monat und wechselnde Dienste;
+      // Schichtarbeit = Dienste mit unterschiedlichen Anfangszeiten
+      let zulage = '', zulageEur = 0;
+      if (nachtschichten >= Number(settings.wechselschicht_min_naechte || 2) && beginne.size >= 2) {
+        zulage = 'Wechselschicht'; zulageEur = Number(settings.zulage_wechselschicht_eur) || 0;
+      } else if (beginne.size >= 2) {
+        zulage = 'Schicht'; zulageEur = Number(settings.zulage_schicht_eur) || 0;
+      }
       return {
+        zulage, zulage_eur: zulageEur,
         user_id: u.id, name: u.name, qualification: u.qualification, weekly_hours: u.weekly_hours,
         min_hours_month: u.min_hours_month, dienste: shifts.length, nachtschichten,
         gearbeitet: r2(sum.stunden), urlaub_tage: urlaubTage, urlaub_std: r2(urlaubStd), krank_tage: krankTage, krank_std: r2(krankStd),
@@ -1458,11 +1518,11 @@ function createApp(db, opts = {}) {
     const num = (x) => String(x).replace('.', ',');
     const head = ['Name', 'Qualifikation', 'Wochenstd.', 'Soll', 'Gearbeitet', 'Urlaubstage', 'Urlaub Std.', 'Krankheitstage', 'Krank Std.',
       'Sonderurlaub Tage', 'Sonderurlaub Std.', 'Ist gesamt', 'Saldo', 'Mindeststd.', 'Mindeststd. erfüllt', 'Dienste', 'Nachtschichten', 'Nacht-Std.', 'Samstag-Std.',
-      'Sonntag-Std.', 'Feiertag-Std.', 'Vorfest-Std.', 'Zuschläge EUR', 'AU fehlt'];
+      'Sonntag-Std.', 'Feiertag-Std.', 'Vorfest-Std.', 'Zuschläge EUR', 'Zulage', 'Zulage EUR', 'AU fehlt'];
     const lines = [head, ...r.rows.map((x) => [x.name, x.qualification, num(x.weekly_hours), num(x.soll), num(x.gearbeitet),
       x.urlaub_tage, num(x.urlaub_std), x.krank_tage, num(x.krank_std), x.sonder_tage, num(x.sonder_std), num(x.ist), num(x.saldo),
       num(x.min_hours_month), x.min_erfuellt ? 'ja' : 'nein', x.dienste, x.nachtschichten, num(x.nacht), num(x.samstag),
-      num(x.sonntag), num(x.feiertag), num(x.vorfest), num(x.zuschlag_eur), x.au_fehlt])];
+      num(x.sonntag), num(x.feiertag), num(x.vorfest), num(x.zuschlag_eur), x.zulage, num(x.zulage_eur), x.au_fehlt])];
     const csv = '﻿' + lines.map((l) => l.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="zeitkonto-${r.month}.csv"`);
@@ -1475,7 +1535,7 @@ function createApp(db, opts = {}) {
     db, T, TOTP, HttpError, auth, manager, wrap, audit, getSettings, isoDate, isTime, nowLocalMs, todayIso,
     hasMgr, isHaupt, publicUser, loadShifts, loadRules, qualMissing, verbundGroup, checkConflicts, absenceOn, uploadDir, express,
     hooks, shiftLabel, managerIds, decorateAbsence, timers: opts.timers !== false,
-    scopeOf, inScope, userInScope, requireUnit, requireUser, managerFull,
+    scopeOf, inScope, userInScope, requireUnit, requireUser, managerFull, arbzgCheck,
   };
   for (const name of fs.readdirSync(path.join(__dirname, 'routes')).filter((f) => f.endsWith('.js')).sort()) {
     require(path.join(__dirname, 'routes', name))(app, ctx);

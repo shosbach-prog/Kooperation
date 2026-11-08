@@ -317,3 +317,57 @@ test('Dienstwünsche: Frist, Höchstzahl, Wunschdienst, Sichtbarkeit', async () 
   // Verwaltung darf trotz Frist/Limit für Personen ihres Bereichs eintragen
   assert.equal((await mgr('PUT', '/api/wishes', { user_id: users.kschulz, date: day(2), art: 'frei' })).status, 200);
 });
+
+test('Arbeitszeitregeln und Wechselschichtzulage', async () => {
+  const julia = await as('jschmitz');
+  await mgr('PUT', '/api/settings', { max_std_tag: 10, max_std_woche: 48, max_naechte_folge: 3, max_tage_folge: 6, ruhezeit_std: 11 });
+  // Nachtdienste in Folge: 3 erlaubt, der 4. nicht (für Mitarbeitende), Verwaltung kann Ausnahme machen
+  // ein Montag zwischen dem 1. und 10. eines Monats (alle Testdienste liegen im selben Monat)
+  const start = (() => { for (let i = 50; ; i++) { const x = new Date(day(i)); if (x.getUTCDay() === 1 && x.getUTCDate() <= 10) return i; } })();
+  const nights = [];
+  for (let i = 0; i < 4; i++) nights.push(await shiftOn(day(start + i), 'N', 'Station 2'));
+  for (let i = 0; i < 3; i++) assert.equal((await julia('POST', `/api/shifts/${nights[i].id}/assign`)).status, 200);
+  let r = await julia('POST', `/api/shifts/${nights[3].id}/assign`);
+  assert.equal(r.data.code, 'ARBZG');
+  assert.match(r.data.error, /4 Nachtdienste in Folge/);
+  r = await mgr('POST', `/api/shifts/${nights[3].id}/assign`, { user_id: users.jschmitz });
+  assert.equal(r.data.code, 'ARBZG');
+  r = await mgr('POST', `/api/shifts/${nights[3].id}/assign`, { user_id: users.jschmitz, force: true });
+  assert.equal(r.status, 200);
+
+  // Tageshöchstarbeitszeit: ein 11-Stunden-Dienst ist nicht ohne Ausnahme möglich
+  const lang = (await mgr('POST', '/api/shift-types', { name: 'Langdienst', code: 'L', start_time: '07:00', end_time: '18:30', break_min: 30 })).data;
+  await mgr('PUT', '/api/requirements', [{ unit_id: 1, shift_type_id: lang.id, weekday: new Date(day(start + 10)).getUTCDay(), min_staff: 1, max_staff: 2 }]);
+  const l = await shiftOn(day(start + 10), 'L', 'Station 1');
+  r = await julia('POST', `/api/shifts/${l.id}/assign`);
+  assert.equal(r.data.code, 'ARBZG');
+  assert.match(r.data.error, /Mehr als 10 Std/);
+  await mgr('PUT', `/api/shift-types/${lang.id}`, { active: false });
+
+  // Wochenhöchstarbeitszeit (hier testweise 20 Std.): 3. Dienst à 8 Std. in derselben Woche überschreitet
+  await mgr('PUT', '/api/settings', { max_std_woche: 20, max_naechte_folge: 0 });
+  const wk = start + 14;
+  const fr = [];
+  for (let i = 0; i < 3; i++) fr.push(await shiftOn(day(wk + i), 'F', 'Station 1'));
+  const tobias = await as('twagner');
+  assert.equal((await tobias('POST', `/api/shifts/${fr[0].id}/assign`)).status, 200);
+  assert.equal((await tobias('POST', `/api/shifts/${fr[1].id}/assign`)).status, 200);
+  r = await tobias('POST', `/api/shifts/${fr[2].id}/assign`);
+  assert.equal(r.data.code, 'ARBZG');
+  assert.match(r.data.error, /Mehr als 20 Std\. in der Woche/);
+  await mgr('PUT', '/api/settings', { max_std_woche: 48, max_naechte_folge: 5 });
+
+  // Zulage: Julia hat im Monat 4 Nachtdienste und (nur) Nachtdienste → keine wechselnden Anfangszeiten → keine Zulage
+  const month = day(start).slice(0, 7);
+  let row = (await mgr('GET', `/api/report?month=${month}`)).data.rows.find((x) => x.user_id === users.jschmitz);
+  assert.equal(row.nachtschichten, 4);
+  assert.equal(row.zulage, '');
+  // plus ein Frühdienst im selben Monat → Wechselschicht
+  const extra = await shiftOn(day(start + 7), 'F', 'Station 1');
+  await mgr('POST', `/api/shifts/${extra.id}/assign`, { user_id: users.jschmitz, force: true });
+  row = (await mgr('GET', `/api/report?month=${month}`)).data.rows.find((x) => x.user_id === users.jschmitz);
+  assert.equal(row.zulage, 'Wechselschicht');
+  assert.equal(row.zulage_eur, 155);
+  const csv = (await mgr('GET', `/api/report.csv?month=${month}`)).data;
+  assert.match(csv, /Zulage EUR/);
+});

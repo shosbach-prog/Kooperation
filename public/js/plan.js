@@ -260,7 +260,7 @@ async function assign(s, userId, force = false) {
     await api('POST', `api/shifts/${s.id}/assign`, body);
     toast('Eingetragen.');
   } catch (e) {
-    if (canManageUnit(s.unit_id) && !force && (e.code === 'RUHEZEIT' || e.code === 'VOLL')
+    if (canManageUnit(s.unit_id) && !force && (e.code === 'RUHEZEIT' || e.code === 'VOLL' || e.code === 'ARBZG')
       && await uiConfirm(`${e.message} Trotzdem eintragen (Ausnahme durch die Einsatzplanung)?`, { title: 'Ausnahme', okText: 'Trotzdem eintragen' })) {
       return assign(s, userId, true);
     }

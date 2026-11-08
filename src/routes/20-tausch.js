@@ -25,6 +25,8 @@ module.exports = (app, ctx) => {
     if (abs) throw new HttpError(409, 'An diesem Tag ist eine Abwesenheit eingetragen.', 'ABWESEND');
     const conflict = checkConflicts(shift, takerId, getSettings());
     if (conflict) throw new HttpError(409, conflict.message, conflict.code);
+    const regeln = ctx.arbzgCheck(shift, takerId, getSettings());
+    if (regeln.length) throw new HttpError(409, `Arbeitszeitregel: ${regeln.map((x) => x.message).join(' ')}`, 'ARBZG');
     // Qualifikation: Nach dem Tausch darf keine zusätzliche Lücke entstehen
     const current = loadShifts('s.id = ?', [o.shift_id])[0];
     const taker = db.prepare('SELECT id AS user_id, name, qualification FROM users WHERE id = ?').get(takerId);
