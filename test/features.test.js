@@ -658,3 +658,47 @@ test('Passkeys: Schutz der Schnittstellen', async () => {
   assert.deepEqual((await lena('GET', '/api/passkeys')).data, []);
   assert.equal((await lena('DELETE', '/api/passkeys/999')).status, 404);
 });
+
+test('Rufbereitschaft ist keine Arbeitszeit: Zuweisung ohne Ausnahme, Lohn-Export ohne Doppelzählung', async () => {
+  const nu = await mgr('POST', '/api/users', { username: 'ruftest', name: 'Ruf Test', password: 'demo12345', role: 'staff', weekly_hours: 38.5, stundenentgelt: 20, personalnummer: '8800' });
+  const uid = nu.data.id;
+  const st2 = (await mgr('GET', '/api/units')).data.find((u) => u.name === 'Station 2').id;
+  const types = (await mgr('GET', '/api/shift-types')).data;
+  const rb = types.find((t) => t.art === 'ruf') || (await mgr('POST', '/api/shift-types', { name: 'Rufbereitschaft', code: 'RB', start_time: '08:00', end_time: '08:00', break_min: 0, art: 'ruf' })).data;
+  const bd = types.find((t) => t.art === 'bereitschaft') || (await mgr('POST', '/api/shift-types', { name: 'Bereitschaft', code: 'BD', start_time: '16:00', end_time: '22:00', break_min: 0, art: 'bereitschaft', bewertung: 50 })).data;
+  const reqs = [0, 1, 2, 3, 4, 5, 6].flatMap((w) => [rb, bd].map((t) => ({ unit_id: st2, shift_type_id: t.id, weekday: w, min_staff: 1 })));
+  await mgr('PUT', '/api/requirements', reqs);
+  try {
+    // 24-Std.-Rufbereitschaft plus Frühdienst am selben Tag: ohne force zulässig
+    const d = day(45);
+    const ruf = await shiftOn(d, 'RB', 'Station 2');
+    let r = await mgr('POST', `/api/shifts/${ruf.id}/assign`, { user_id: uid });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    const f = await shiftOn(d, 'F', 'Station 2');
+    r = await mgr('POST', `/api/shifts/${f.id}/assign`, { user_id: uid });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    // Bereitschaftsdienst zählt dagegen als Arbeitszeit: F + BD am selben Tag verletzt die Ruhezeit nicht, aber ArbZG-Tag (8 + 6 Std.)
+    const b = await shiftOn(d, 'BD', 'Station 2');
+    r = await mgr('POST', `/api/shifts/${b.id}/assign`, { user_id: uid });
+    assert.equal(r.status, 409);
+
+    // Lohn-Export: Stunden-Lohnart ohne Bereitschaft/Ruf-Einsätze
+    const p = day(-3);
+    const rp = await shiftOn(p, 'RB', 'Station 2');
+    await mgr('POST', `/api/shifts/${rp.id}/assign`, { user_id: uid });
+    await mgr('PUT', `/api/zeiten/${rp.id}`, { user_id: uid, einsatz_std: 2 });
+    const bp = await shiftOn(day(-5), 'BD', 'Station 2');
+    await mgr('POST', `/api/shifts/${bp.id}/assign`, { user_id: uid, force: true });
+    const month = p.slice(0, 7);
+    if (day(-5).slice(0, 7) === month) {
+      const row = (await mgr('GET', `/api/report?month=${month}&user_id=${uid}`)).data.rows[0];
+      const lines = (await mgr('GET', `/api/export/lohn?month=${month}`)).data.lines.filter((x) => x.personalnummer === '8800');
+      const get = (k) => lines.find((x) => x.schluessel === k)?.menge || 0;
+      assert.equal(get('ruf_einsatz'), 2);
+      assert.equal(get('bereitschaft'), 3);
+      assert.equal(Math.round((get('stunden') + get('bereitschaft') + get('ruf_einsatz')) * 100) / 100, row.gearbeitet);
+    }
+  } finally {
+    await mgr('PUT', '/api/requirements', reqs.map((x) => ({ ...x, min_staff: 0 })));
+  }
+});

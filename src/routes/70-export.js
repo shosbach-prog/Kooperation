@@ -8,7 +8,7 @@ module.exports = (app, ctx) => {
 
   const LOHNARTEN = [
     // Schlüssel, Bezeichnung, Feld im Bericht, Einheit, Betragsfeld
-    ['stunden', 'Gearbeitete Stunden', 'gearbeitet', 'Std.'],
+    ['stunden', 'Gearbeitete Stunden (Dienste, ohne Bereitschaft/Ruf)', 'dienst_std', 'Std.'],
     ['ueberstunden', 'Mehr-/Minderarbeit (Ist − Plan)', 'ueberstunden', 'Std.'],
     ['nacht', 'Zeitzuschlag Nachtarbeit', 'nacht', 'Std.'],
     ['samstag', 'Zeitzuschlag Samstag', 'samstag', 'Std.'],
@@ -34,7 +34,10 @@ module.exports = (app, ctx) => {
     const users = Object.fromEntries(db.prepare('SELECT id, personalnummer FROM users').all().map((u) => [u.id, u.personalnummer || '']));
     const nr = nummern();
     const lines = [];
-    for (const x of r.rows) {
+    for (const x0 of r.rows) {
+      // „gearbeitet“ enthält auch bewertete Bereitschaft und Ruf-Einsätze – die stehen als eigene Lohnarten darunter
+      const r2 = (v) => Math.round(v * 100) / 100;
+      const x = { ...x0, dienst_std: r2((Number(x0.gearbeitet) || 0) - (Number(x0.bereitschaft_std) || 0) - (Number(x0.ruf_einsatz_std) || 0)) };
       for (const [key, label, mengeFeld, einheit, betragFeld] of LOHNARTEN) {
         const menge = mengeFeld ? Number(x[mengeFeld]) || 0 : null;
         const betrag = betragFeld ? Number(x[betragFeld]) || 0 : null;

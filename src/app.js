@@ -898,7 +898,7 @@ function createApp(db, opts = {}) {
   };
 
   const loadShifts = (where, params) => {
-    const shifts = db.prepare(`SELECT s.*, st.name AS type_name, st.code AS type_code, st.color AS type_color, u.name AS unit_name,
+    const shifts = db.prepare(`SELECT s.*, st.name AS type_name, st.code AS type_code, st.color AS type_color, st.art, st.bewertung, u.name AS unit_name,
         CASE WHEN v.id IS NULL THEN NULL ELSE u.verbund_id END AS verbund_id, v.name AS verbund_name, v.gemeinsam AS verbund_gemeinsam
       FROM shifts s JOIN shift_types st ON st.id = s.shift_type_id JOIN units u ON u.id = s.unit_id
       LEFT JOIN verbuende v ON v.id = u.verbund_id AND v.active = 1
@@ -988,13 +988,19 @@ function createApp(db, opts = {}) {
   }));
 
   /** Prüft Überschneidungen und Ruhezeit (ArbZG § 5 / TVöD) */
+  /** Art der Schicht (dienst | bereitschaft | ruf); Rufbereitschaft ist keine Arbeitszeit nach ArbZG */
+  const artStmt = db.prepare('SELECT art FROM shift_types WHERE id = ?');
+  const artOf = (s) => s.art || artStmt.get(s.shift_type_id)?.art || 'dienst';
+
   const checkConflicts = (shift, userId, settings) => {
+    // Rufbereitschaft: keine Arbeitszeit → weder Überschneidung noch Ruhezeit prüfen
+    if (artOf(shift) === 'ruf') return null;
     const iv = T.shiftInterval(shift.date, shift.start_time, shift.end_time);
     const lo = T.isoDate(T.parseDate(shift.date) - 2 * T.DAY);
     const hi = T.isoDate(T.parseDate(shift.date) + 2 * T.DAY);
     const others = db.prepare(`SELECT s.*, u.name AS unit_name, st.code FROM shifts s JOIN assignments a ON a.shift_id = s.id
       JOIN units u ON u.id = s.unit_id JOIN shift_types st ON st.id = s.shift_type_id
-      WHERE a.user_id = ? AND s.id <> ? AND s.date BETWEEN ? AND ?`).all(userId, shift.id, lo, hi);
+      WHERE a.user_id = ? AND s.id <> ? AND s.date BETWEEN ? AND ? AND st.art <> 'ruf'`).all(userId, shift.id, lo, hi);
     const restMs = (Number(settings.ruhezeit_std) || 0) * 3600e3;
     for (const o of others) {
       const oi = T.shiftInterval(o.date, o.start_time, o.end_time);
@@ -1014,10 +1020,12 @@ function createApp(db, opts = {}) {
    */
   const arbzgCheck = (shift, userId, settings, extraShifts = []) => {
     const out = [];
+    if (artOf(shift) === 'ruf') return out; // Rufbereitschaft zählt nicht als Arbeitszeit (nur spätere Einsätze)
     const lo = T.isoDate(T.parseDate(shift.date) - 31 * T.DAY), hi = T.isoDate(T.parseDate(shift.date) + 31 * T.DAY);
-    const own = db.prepare(`SELECT s.* FROM shifts s JOIN assignments a ON a.shift_id = s.id
+    const own = db.prepare(`SELECT s.*, st.art FROM shifts s JOIN assignments a ON a.shift_id = s.id JOIN shift_types st ON st.id = s.shift_type_id
       WHERE a.user_id = ? AND s.id <> ? AND s.date BETWEEN ? AND ?`).all(userId, shift.id, lo, hi)
-      .concat(extraShifts.filter((x) => x.id !== shift.id));
+      .concat(extraShifts.filter((x) => x.id !== shift.id))
+      .filter((x) => artOf(x) !== 'ruf');
     const all = [...own, shift];
     const hours = (x) => T.shiftHours(x);
     const fmtH = (x) => String(Math.round(x * 10) / 10).replace('.', ',');

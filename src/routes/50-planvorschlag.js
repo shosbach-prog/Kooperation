@@ -33,12 +33,15 @@ module.exports = (app, ctx) => {
     const loadPlanned = (uid, month) => {
       const key = `${uid}|${month}`;
       if (!planned.has(key)) {
-        const rows = db.prepare(`SELECT s.* FROM shifts s JOIN assignments a ON a.shift_id = s.id WHERE a.user_id = ? AND substr(s.date, 1, 7) = ?`).all(uid, month);
-        planned.set(key, rows.reduce((acc, s) => acc + T.shiftHours(s), 0));
+        const rows = db.prepare(`SELECT s.*, st.art, st.bewertung FROM shifts s JOIN assignments a ON a.shift_id = s.id JOIN shift_types st ON st.id = s.shift_type_id
+          WHERE a.user_id = ? AND substr(s.date, 1, 7) = ?`).all(uid, month);
+        planned.set(key, rows.reduce((acc, s) => acc + credit(s), 0));
       }
       return planned.get(key);
     };
-    const isNight = (s) => T.breakdown(s, settings).nachtschicht;
+    // angerechnete Stunden: Rufbereitschaft 0 (nur Einsätze zählen), Bereitschaftsdienst mit Bewertung
+    const credit = (s) => (s.art === 'ruf' ? 0 : s.art === 'bereitschaft' ? T.shiftHours(s) * (Number(s.bewertung) || 0) / 100 : T.shiftHours(s));
+    const isNight = (s) => s.art !== 'ruf' && T.breakdown(s, settings).nachtschicht;
     const isWeekend = (d) => [0, 6].includes(new Date(T.parseDate(d)).getUTCDay());
 
     // Schichten mit Bedarf: Nächte und Wochenenden zuerst (schwerer zu besetzen), dann chronologisch
@@ -68,7 +71,7 @@ module.exports = (app, ctx) => {
           if (ctx.arbzgCheck(s, u.id, settings).length) continue;
           const sollM = soll(u, month);
           const hat = loadPlanned(u.id, month);
-          if (sollM > 0 && hat + T.shiftHours(s) > sollM + TOLERANZ_STD) continue;
+          if (sollM > 0 && hat + credit(s) > sollM + TOLERANZ_STD) continue;
           // Bewertung: kleiner = besser
           let score = sollM > 0 ? hat / sollM : 1;
           const gruende = [`${Math.round(hat)} von ${Math.round(sollM)} Std. geplant`];
@@ -88,7 +91,7 @@ module.exports = (app, ctx) => {
         kandidaten.sort((a, b) => a.score - b.score || a.u.name.localeCompare(b.u.name, 'de'));
         const best = kandidaten[0];
         db.prepare('INSERT INTO assignments (shift_id, user_id, created_by) VALUES (?, ?, ?)').run(s.id, best.u.id, req.user.id);
-        planned.set(`${best.u.id}|${month}`, loadPlanned(best.u.id, month) + T.shiftHours(s));
+        planned.set(`${best.u.id}|${month}`, loadPlanned(best.u.id, month) + credit(s));
         if (night) nightCount.set(best.u.id, (nightCount.get(best.u.id) || 0) + 1);
         if (weekend) weekendCount.set(best.u.id, (weekendCount.get(best.u.id) || 0) + 1);
         vorschlaege.push({
