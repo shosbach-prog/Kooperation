@@ -52,6 +52,18 @@ if [[ ! "$KEEP_ENV" =~ ^[JjYy] ]]; then
   done
 
   echo
+  echo "Soll der Dienstplan in einem Unterordner laufen? Beispiel: /LWL  → https://$DOMAIN/LWL"
+  echo "Leer lassen, wenn er direkt unter https://$DOMAIN erreichbar sein soll."
+  while true; do
+    read -r -p "Unterordner (z. B. /LWL, sonst Enter): " BASE_PATH
+    BASE_PATH="${BASE_PATH%/}"
+    if [ -z "$BASE_PATH" ]; then break; fi
+    [[ "$BASE_PATH" == /* ]] || BASE_PATH="/$BASE_PATH"
+    if [[ "$BASE_PATH" =~ ^(/[A-Za-z0-9_-]+)+$ ]]; then break; fi
+    rot "Bitte nur Buchstaben, Ziffern, - und _ verwenden, z. B. /LWL"
+  done
+
+  echo
   echo "Startpasswort für den Benutzer \"manager\" (mind. 10 Zeichen;"
   echo "nicht erlaubt: Leerzeichen, Anführungszeichen, \$, \\ und \`)."
   while true; do
@@ -106,6 +118,7 @@ if [[ ! "$KEEP_ENV" =~ ^[JjYy] ]]; then
   umask 077
   cat > "$DEPLOY_DIR/.env" <<EOF
 DOMAIN=$DOMAIN
+BASE_PATH=$BASE_PATH
 MANAGER_PASSWORD=$PW1
 SEED_DEMO=$SEED_DEMO
 EOF
@@ -113,6 +126,8 @@ EOF
   umask 022
 fi
 DOMAIN="$(grep '^DOMAIN=' "$DEPLOY_DIR/.env" | cut -d= -f2-)"
+BASE_PATH="$(grep '^BASE_PATH=' "$DEPLOY_DIR/.env" | cut -d= -f2- || true)"
+URL="https://$DOMAIN$BASE_PATH/"
 mkdir -p "$DEPLOY_DIR/data"
 chmod 700 "$DEPLOY_DIR/data"
 
@@ -142,22 +157,22 @@ chmod 644 /etc/cron.d/dienstplan-backup
 blau "Warte auf das Programm und das HTTPS-Zertifikat …"
 OK=0
 for _ in $(seq 1 30); do
-  if curl -fsS -o /dev/null --max-time 5 "https://$DOMAIN/"; then OK=1; break; fi
+  if curl -fsS -o /dev/null --max-time 5 "$URL"; then OK=1; break; fi
   sleep 5
 done
 
 echo
 if [ "$OK" = 1 ]; then
-  printf '\033[1;32m%s\033[0m\n' "Fertig! Der Dienstplan ist erreichbar unter:  https://$DOMAIN"
+  printf '\033[1;32m%s\033[0m\n' "Fertig! Der Dienstplan ist erreichbar unter:  $URL"
 else
-  gelb "Das Programm läuft, die Adresse https://$DOMAIN antwortet aber noch nicht."
+  gelb "Das Programm läuft, die Adresse $URL antwortet aber noch nicht."
   gelb "Meist fehlt der DNS-Eintrag oder er ist noch nicht verbreitet (bis zu 1 Stunde)."
   gelb "Status prüfen mit:  cd $DEPLOY_DIR && docker compose logs caddy"
 fi
 cat <<EOF
 
 Nächste Schritte:
-  1. https://$DOMAIN öffnen und mit Benutzer "manager" anmelden.
+  1. $URL öffnen und mit Benutzer "manager" anmelden.
   2. Zwei-Faktor-Anmeldung mit der Authenticator-App einrichten.
   3. Unter "Sicherheit" das Passwort ändern.
 

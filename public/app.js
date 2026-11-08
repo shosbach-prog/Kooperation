@@ -32,7 +32,7 @@ async function api(method, url, body) {
   const isJson = (res.headers.get('content-type') || '').includes('json');
   const data = isJson ? await res.json() : await res.text();
   if (!res.ok) {
-    const authUrl = url.startsWith('/api/login') || url.startsWith('/api/2fa') || url === '/api/me';
+    const authUrl = url.startsWith('api/login') || url.startsWith('api/2fa') || url === 'api/me';
     if (res.status === 401 && !authUrl) { state.me = null; renderLogin(); }
     const e = new Error((data && data.error) || res.statusText);
     e.code = data && data.code; e.status = res.status;
@@ -83,7 +83,7 @@ function renderLogin() {
     ev.preventDefault();
     const fd = new FormData(form);
     try {
-      const r = await api('POST', '/api/login', { username: fd.get('username'), password: fd.get('password') });
+      const r = await api('POST', 'api/login', { username: fd.get('username'), password: fd.get('password') });
       if (r.stage === '2fa') renderCodeStep();
       else if (r.stage === 'setup') renderSetup(false);
       else await boot();
@@ -120,7 +120,7 @@ function renderTabs() {
 async function refreshBadges() {
   if (!isMgr()) return;
   try {
-    const r = await api('GET', '/api/absences');
+    const r = await api('GET', 'api/absences');
     state.badges.abwesenheiten = r.absences.filter((a) => a.status === 'beantragt' || a.au_ueberfaellig).length;
   } catch { /* ignorieren */ }
   renderTabs();
@@ -136,7 +136,7 @@ async function go(view) {
 
 async function boot() {
   try {
-    const { user, settings } = await api('GET', '/api/me');
+    const { user, settings } = await api('GET', 'api/me');
     state.me = user; state.settings = settings;
   } catch (e) {
     if (e.code === 'STAGE_2FA') renderCodeStep();
@@ -157,7 +157,7 @@ async function boot() {
 }
 
 document.getElementById('logout').addEventListener('click', async () => {
-  await api('POST', '/api/logout').catch(() => {});
+  await api('POST', 'api/logout').catch(() => {});
   state.me = null; location.hash = ''; renderLogin();
 });
 
@@ -165,9 +165,9 @@ document.getElementById('logout').addEventListener('click', async () => {
 async function renderPlan() {
   const from = state.weekStart, to = addDays(from, 6);
   const [units, types, plan, users] = await Promise.all([
-    api('GET', '/api/units'), api('GET', '/api/shift-types'),
-    api('GET', `/api/plan?from=${from}&to=${to}`),
-    isMgr() ? api('GET', '/api/users') : Promise.resolve([]),
+    api('GET', 'api/units'), api('GET', 'api/shift-types'),
+    api('GET', `api/plan?from=${from}&to=${to}`),
+    isMgr() ? api('GET', 'api/users') : Promise.resolve([]),
   ]);
   const days = [...Array(7)].map((_, i) => addDays(from, i));
   const byKey = new Map(plan.shifts.map((s) => [`${s.date}|${s.unit_id}|${s.shift_type_id}`, s]));
@@ -351,7 +351,7 @@ async function assign(s, userId, force = false) {
     }
   }
   try {
-    await api('POST', `/api/shifts/${s.id}/assign`, body);
+    await api('POST', `api/shifts/${s.id}/assign`, body);
     toast('Eingetragen.');
   } catch (e) {
     if (isMgr() && !force && (e.code === 'RUHEZEIT' || e.code === 'VOLL')
@@ -369,7 +369,7 @@ async function unassign(s, userId, name) {
   const reason = askReason(`${who} ${s.type_name} am ${fmtDate(s.date)} (${s.unit_name}) austragen?\n\nBegründung:`, required);
   if (reason === null) return;
   try {
-    await api('DELETE', `/api/shifts/${s.id}/assign${isMgr() ? `?user_id=${userId}` : ''}`, { reason });
+    await api('DELETE', `api/shifts/${s.id}/assign${isMgr() ? `?user_id=${userId}` : ''}`, { reason });
     toast('Ausgetragen.');
   } catch (e) { toast(e.message, true); }
   refresh();
@@ -383,7 +383,7 @@ async function editShift(s) {
   const note = prompt('Notiz (optional):', s.note || '');
   if (note === null) return;
   try {
-    await api('PUT', `/api/shifts/${s.id}`, { min_staff: Number(min), max_staff: max === '' ? null : Number(max), note });
+    await api('PUT', `api/shifts/${s.id}`, { min_staff: Number(min), max_staff: max === '' ? null : Number(max), note });
     toast('Gespeichert.');
   } catch (e) { toast(e.message, true); }
   refresh();
@@ -394,7 +394,7 @@ function refresh() { VIEWS[state.view].render(); refreshBadges(); }
 // ---------- Meine Dienste (Mitarbeitende) ----------
 async function renderMine() {
   const from = todayIso();
-  const shifts = await api('GET', `/api/my-shifts?from=${from}&to=${addDays(from, 120)}`);
+  const shifts = await api('GET', `api/my-shifts?from=${from}&to=${addDays(from, 120)}`);
   const s = state.settings;
   setMain(h('div', { class: 'card' },
     h('h2', {}, 'Meine kommenden Dienste'),
@@ -415,7 +415,7 @@ async function renderMine() {
 
 // ---------- Stundenkonto (Mitarbeitende) ----------
 async function renderKonto() {
-  const r = await api('GET', `/api/report?month=${state.month}`);
+  const r = await api('GET', `api/report?month=${state.month}`);
   const x = r.rows[0];
   const pct = x.min_hours_month ? Math.min(100, (x.ist / x.min_hours_month) * 100) : 100;
   setMain(h('div', { class: 'card' },
@@ -459,12 +459,12 @@ function zuschlagTable(rows, withName) {
 
 // ---------- Auswertung (Manager) ----------
 async function renderReport() {
-  const r = await api('GET', `/api/report?month=${state.month}`);
+  const r = await api('GET', `api/report?month=${state.month}`);
   setMain(h('div', { class: 'card' },
     h('div', { class: 'toolbar' },
       h('label', {}, 'Monat', h('input', { type: 'month', value: state.month, onchange: (e) => { state.month = e.target.value; renderReport(); } })),
       h('span', { class: 'spacer' }),
-      h('a', { href: `/api/report.csv?month=${state.month}` }, h('button', { class: 'ghost' }, 'CSV-Export (Excel)'))),
+      h('a', { href: `api/report.csv?month=${state.month}` }, h('button', { class: 'ghost' }, 'CSV-Export (Excel)'))),
     zuschlagTable(r.rows, true),
     h('h3', {}, `Unterbesetzte Schichten (${r.understaffed.length})`),
     r.understaffed.length ? h('div', { class: 'table-wrap' }, h('table', {},
@@ -477,7 +477,7 @@ async function renderReport() {
 
 // ---------- Plan erzeugen (Manager) ----------
 async function renderGenerate() {
-  const units = (await api('GET', '/api/units')).filter((u) => u.active);
+  const units = (await api('GET', 'api/units')).filter((u) => u.active);
   const start = addDays(mondayOf(todayIso()), 7);
   const fromI = h('input', { type: 'date', value: start });
   const toI = h('input', { type: 'date', value: addDays(start, 27) });
@@ -494,7 +494,7 @@ async function renderGenerate() {
         try {
           const ids = checks.map((c) => c.querySelector('input')).filter((c) => c.checked).map((c) => Number(c.value));
           if (!ids.length) return toast('Bitte mindestens einen Bereich wählen.', true);
-          const r = await api('POST', '/api/shifts/generate', { from: fromI.value, to: toI.value, unit_ids: ids });
+          const r = await api('POST', 'api/shifts/generate', { from: fromI.value, to: toI.value, unit_ids: ids });
           toast(`${r.created} Schichten angelegt.`);
           state.weekStart = mondayOf(fromI.value);
         } catch (e) { toast(e.message, true); }
@@ -504,7 +504,7 @@ async function renderGenerate() {
 
 // ---------- Mitarbeitende (Manager) ----------
 async function renderStaff() {
-  const users = await api('GET', '/api/users');
+  const users = await api('GET', 'api/users');
   const form = staffForm(null);
   setMain(
     h('div', { class: 'card' }, h('h2', {}, 'Mitarbeitende'),
@@ -526,7 +526,7 @@ async function renderStaff() {
 
 async function userAction(u, body, question) {
   if (question && !confirm(question)) return;
-  try { await api('PUT', `/api/users/${u.id}`, body); toast('Erledigt.'); renderStaff(); } catch (e) { toast(e.message, true); }
+  try { await api('PUT', `api/users/${u.id}`, body); toast('Erledigt.'); renderStaff(); } catch (e) { toast(e.message, true); }
 }
 
 function staffForm(u) {
@@ -565,7 +565,7 @@ function staffForm(u) {
     if (u && !data.password) delete data.password;
     if ('active' in data) data.active = data.active === '1';
     try {
-      await api(u ? 'PUT' : 'POST', u ? `/api/users/${u.id}` : '/api/users', data);
+      await api(u ? 'PUT' : 'POST', u ? `api/users/${u.id}` : 'api/users', data);
       toast('Gespeichert.');
       renderStaff();
     } catch (e) { toast(e.message, true); }
@@ -575,7 +575,7 @@ function staffForm(u) {
 
 // ---------- Dienstzeiten / Schichtarten (Manager) ----------
 async function renderShiftTypes() {
-  const [types, units] = await Promise.all([api('GET', '/api/shift-types'), api('GET', '/api/units')]);
+  const [types, units] = await Promise.all([api('GET', 'api/shift-types'), api('GET', 'api/units')]);
   const typeRow = (t) => {
     const inp = (k, attrs) => h('input', { value: t?.[k] ?? '', ...attrs });
     const r = {
@@ -592,7 +592,7 @@ async function renderShiftTypes() {
         body.apply_future = confirm('Geänderte Zeiten auch für bereits erzeugte, zukünftige Schichten übernehmen?');
       }
       try {
-        const res = await api(t ? 'PUT' : 'POST', t ? `/api/shift-types/${t.id}` : '/api/shift-types', body);
+        const res = await api(t ? 'PUT' : 'POST', t ? `api/shift-types/${t.id}` : 'api/shift-types', body);
         toast(res.updated_shifts ? `Gespeichert, ${res.updated_shifts} Schichten angepasst.` : 'Gespeichert.');
         renderShiftTypes();
       } catch (e) { toast(e.message, true); }
@@ -607,7 +607,7 @@ async function renderShiftTypes() {
     return h('tr', { class: u && !u.active ? 'inactive' : '' }, h('td', {}, name), h('td', {}, active),
       h('td', {}, h('button', {
         class: 'tiny', onclick: async () => {
-          try { await api(u ? 'PUT' : 'POST', u ? `/api/units/${u.id}` : '/api/units', { name: name.value, active: active.checked }); toast('Gespeichert.'); renderShiftTypes(); } catch (e) { toast(e.message, true); }
+          try { await api(u ? 'PUT' : 'POST', u ? `api/units/${u.id}` : 'api/units', { name: name.value, active: active.checked }); toast('Gespeichert.'); renderShiftTypes(); } catch (e) { toast(e.message, true); }
         },
       }, u ? 'Speichern' : 'Hinzufügen')));
   };
@@ -631,7 +631,7 @@ function hoursOf(t) {
 
 // ---------- Mindestbesetzung (Manager) ----------
 async function qualRulesCard(units, types) {
-  const rules = await api('GET', '/api/qual-rules');
+  const rules = await api('GET', 'api/qual-rules');
   const unitSel = h('select', {}, h('option', { value: '' }, 'alle Bereiche'), units.map((u) => h('option', { value: u.id }, u.name)));
   const typeSel = h('select', {}, h('option', { value: '' }, 'alle Dienste'), types.map((t) => h('option', { value: t.id }, t.name)));
   const qualSel = h('select', {}, (state.settings.qualifikationen || []).map((q) => h('option', { value: q }, q)));
@@ -642,7 +642,7 @@ async function qualRulesCard(units, types) {
     rules.length ? h('table', {}, h('thead', {}, h('tr', {}, ['Bereich', 'Dienst', 'Qualifikation', 'mindestens', ''].map((x) => h('th', {}, x)))),
       h('tbody', {}, rules.map((r) => h('tr', {}, h('td', {}, r.unit_name || 'alle'), h('td', {}, r.type_name || 'alle'), h('td', {}, r.qualification),
         h('td', {}, r.min_count), h('td', {}, h('button', { class: 'tiny danger', onclick: async () => {
-          await api('DELETE', `/api/qual-rules/${r.id}`); toast('Regel gelöscht.'); renderRequirements();
+          await api('DELETE', `api/qual-rules/${r.id}`); toast('Regel gelöscht.'); renderRequirements();
         } }, 'Löschen'))))))
       : h('p', { class: 'muted' }, 'Noch keine Regeln.'),
     h('h3', {}, 'Neue Regel'),
@@ -650,7 +650,7 @@ async function qualRulesCard(units, types) {
       h('label', {}, 'mindestens', count),
       h('button', { onclick: async () => {
         try {
-          await api('POST', '/api/qual-rules', { unit_id: unitSel.value || null, shift_type_id: typeSel.value || null, qualification: qualSel.value, min_count: Number(count.value) });
+          await api('POST', 'api/qual-rules', { unit_id: unitSel.value || null, shift_type_id: typeSel.value || null, qualification: qualSel.value, min_count: Number(count.value) });
           toast('Regel hinzugefügt.'); renderRequirements();
         } catch (e) { toast(e.message, true); }
       } }, 'Hinzufügen')),
@@ -658,7 +658,7 @@ async function qualRulesCard(units, types) {
 }
 
 async function renderRequirements() {
-  const [units, types, reqs] = await Promise.all([api('GET', '/api/units'), api('GET', '/api/shift-types'), api('GET', '/api/requirements')]);
+  const [units, types, reqs] = await Promise.all([api('GET', 'api/units'), api('GET', 'api/shift-types'), api('GET', 'api/requirements')]);
   const activeTypes = types.filter((t) => t.active);
   const get = (u, t, wd) => reqs.find((r) => r.unit_id === u && r.shift_type_id === t && r.weekday === wd);
   const inputs = [];
@@ -681,7 +681,7 @@ async function renderRequirements() {
     h('p', {}, h('button', {
       onclick: async () => {
         try {
-          await api('PUT', '/api/requirements', inputs.map((i) => ({
+          await api('PUT', 'api/requirements', inputs.map((i) => ({
             unit_id: i.unit_id, shift_type_id: i.shift_type_id, weekday: i.weekday,
             min_staff: Number(i.min.value || 0), max_staff: i.max.value === '' ? null : Number(i.max.value),
           })));
@@ -693,7 +693,7 @@ async function renderRequirements() {
 
 // ---------- Einstellungen (Manager) ----------
 async function renderSettings() {
-  const s = await api('GET', '/api/settings');
+  const s = await api('GET', 'api/settings');
   const fields = [
     ['klinik_name', 'Name der Einrichtung', 'text'],
     ['zwei_faktor_pflicht', 'Zwei-Faktor-Anmeldung für alle verpflichtend', 'checkbox', 'Empfohlen. Ohne eingerichteten zweiten Faktor ist dann keine Anmeldung möglich.'],
@@ -731,7 +731,7 @@ async function renderSettings() {
     const body = Object.fromEntries(Object.entries(els).map(([k, el]) => [k,
       el.dataset.kind === 'list' ? el.value.split('\n') : el.type === 'checkbox' ? el.checked : el.value]));
     try {
-      state.settings = await api('PUT', '/api/settings', body);
+      state.settings = await api('PUT', 'api/settings', body);
       document.getElementById('clinic-name').textContent = state.settings.klinik_name;
       toast('Einstellungen gespeichert.');
     } catch (e) { toast(e.message, true); }
@@ -759,11 +759,11 @@ function auStatus(a) {
 function attachmentList(a, canDelete) {
   if (!a.attachments.length) return null;
   return h('ul', { class: 'files' }, a.attachments.map((f) => h('li', {},
-    h('a', { href: `/api/attachments/${f.id}?inline=1`, target: '_blank', rel: 'noopener' }, f.filename),
+    h('a', { href: `api/attachments/${f.id}?inline=1`, target: '_blank', rel: 'noopener' }, f.filename),
     h('span', { class: 'small muted' }, ` (${fmtSize(f.size)})`),
     canDelete ? h('button', { class: 'tiny danger', title: 'Datei löschen', onclick: async () => {
       if (!confirm(`${f.filename} löschen?`)) return;
-      try { await api('DELETE', `/api/attachments/${f.id}`); toast('Gelöscht.'); refresh(); } catch (e) { toast(e.message, true); }
+      try { await api('DELETE', `api/attachments/${f.id}`); toast('Gelöscht.'); refresh(); } catch (e) { toast(e.message, true); }
     } }, '×') : null)));
 }
 
@@ -774,7 +774,7 @@ function uploadButton(a) {
     if (!file) return;
     if (file.size > 10 * 1024 * 1024) return toast('Die Datei ist größer als 10 MB.', true);
     try {
-      const res = await fetch(`/api/absences/${a.id}/attachments`, {
+      const res = await fetch(`api/absences/${a.id}/attachments`, {
         method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-Filename': encodeURIComponent(file.name) }, body: file,
       });
       const data = await res.json();
@@ -793,7 +793,7 @@ async function extendSickness(a) {
   if (!m) return toast('Bitte Datum als TT.MM.JJJJ angeben.', true);
   const iso = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
   try {
-    const r = await api('PUT', `/api/absences/${a.id}`, { to: iso });
+    const r = await api('PUT', `api/absences/${a.id}`, { to: iso });
     toast(r.removed ? `Gespeichert. ${r.removed} Dienst(e) wurden ausgetragen.` : 'Gespeichert.');
     if (r.au_fehlt) alert(`Ab dem ${state.settings.au_ab_tag}. Krankheitstag ist eine Arbeitsunfähigkeitsbescheinigung erforderlich. Bitte laden Sie sie hoch.`);
   } catch (e) { toast(e.message, true); }
@@ -833,7 +833,7 @@ function absenceForm(type, onSaved, users) {
     ev.preventDefault();
     const t = typeSel ? typeSel.value : type;
     try {
-      const r = await api('POST', '/api/absences', { type: t, from: from.value, to: to.value, note: note.value, user_id: userSel?.value || undefined });
+      const r = await api('POST', 'api/absences', { type: t, from: from.value, to: to.value, note: note.value, user_id: userSel?.value || undefined });
       let msg = t === 'krank' ? 'Krankmeldung gespeichert.' : users ? `${ABS_LABEL[t]} eingetragen.` : `Antrag (${ABS_LABEL[t]}) über ${r.arbeitstage} Arbeitstage gestellt.`;
       if (r.removed) msg += ` ${r.removed} Dienst(e) wurden ausgetragen.`;
       toast(msg);
@@ -848,7 +848,7 @@ function absenceForm(type, onSaved, users) {
 
 async function renderMyAbsences() {
   const year = Number(todayIso().slice(0, 4));
-  const r = await api('GET', `/api/absences?year=${year}`);
+  const r = await api('GET', `api/absences?year=${year}`);
   const kontoCard = (title, k, hint) => {
     const pct = k.anspruch ? Math.min(100, ((k.genehmigt + k.beantragt) / k.anspruch) * 100) : 0;
     return h('div', { class: 'card' }, h('h2', {}, `${title} ${k.jahr}`),
@@ -883,7 +883,7 @@ async function renderMyAbsences() {
             a.type === 'krank' ? h('button', { class: 'tiny ghost', onclick: () => extendSickness(a) }, 'Verlängern') : null,
             a.type !== 'krank' && a.status === 'beantragt' ? h('button', { class: 'tiny danger', onclick: async () => {
               if (!confirm('Antrag zurückziehen?')) return;
-              try { await api('DELETE', `/api/absences/${a.id}`); toast('Zurückgezogen.'); renderMyAbsences(); } catch (e) { toast(e.message, true); }
+              try { await api('DELETE', `api/absences/${a.id}`); toast('Zurückgezogen.'); renderMyAbsences(); } catch (e) { toast(e.message, true); }
             } }, 'Zurückziehen') : null))))))
         : h('p', { class: 'muted' }, 'Keine Einträge.')),
     h('p', { class: 'small muted' }, 'Hinweis: Bei gesetzlich Versicherten ruft der Arbeitgeber die AU zusätzlich elektronisch ab (eAU). ',
@@ -895,9 +895,9 @@ async function renderAbsencesMgr() {
   const [y, m] = state.month.split('-').map(Number);
   const to = toIso(Date.UTC(y, m, 0));
   const [open, inMonth, users] = await Promise.all([
-    api('GET', '/api/absences?status=beantragt'),
-    api('GET', `/api/absences?from=${from}&to=${to}`),
-    api('GET', '/api/users'),
+    api('GET', 'api/absences?status=beantragt'),
+    api('GET', `api/absences?from=${from}&to=${to}`),
+    api('GET', 'api/users'),
   ]);
   const decide = async (a, status) => {
     let note = '';
@@ -909,14 +909,14 @@ async function renderAbsencesMgr() {
       if (!confirm(`${typeLabel(a)} von ${a.name} (${range(a)}, ${a.arbeitstage} Arbeitstage) genehmigen?${extra}`)) return;
     }
     try {
-      const r = await api('PUT', `/api/absences/${a.id}/decision`, { status, note });
+      const r = await api('PUT', `api/absences/${a.id}/decision`, { status, note });
       toast(status === 'genehmigt' ? `Genehmigt.${r.removed ? ` ${r.removed} Dienst(e) ausgetragen.` : ''}` : 'Abgelehnt.');
     } catch (e) { toast(e.message, true); }
     refresh();
   };
   const sick = inMonth.absences.filter((a) => a.type === 'krank');
   const vac = inMonth.absences.filter((a) => a.type !== 'krank' && a.status !== 'beantragt');
-  const auMissing = (await api('GET', '/api/absences')).absences.filter((a) => a.au_ueberfaellig);
+  const auMissing = (await api('GET', 'api/absences')).absences.filter((a) => a.au_ueberfaellig);
   setMain(
     h('div', { class: 'card' }, h('h2', {}, `Offene Anträge (${open.absences.length})`),
       open.absences.length ? h('div', { class: 'table-wrap' }, h('table', {},
@@ -943,7 +943,7 @@ async function renderAbsencesMgr() {
           h('td', { class: 'actions' }, uploadButton(a), h('button', { class: 'tiny ghost', onclick: () => extendSickness(a) }, 'Ende ändern'),
             h('button', { class: 'tiny danger', onclick: async () => {
               if (!confirm(`Krankmeldung von ${a.name} (${range(a)}) löschen? Hochgeladene Bescheinigungen werden ebenfalls gelöscht.`)) return;
-              try { await api('DELETE', `/api/absences/${a.id}`); toast('Gelöscht.'); refresh(); } catch (e) { toast(e.message, true); }
+              try { await api('DELETE', `api/absences/${a.id}`); toast('Gelöscht.'); refresh(); } catch (e) { toast(e.message, true); }
             } }, 'Löschen')))))))
         : h('p', { class: 'muted' }, 'Keine.'),
       h('h3', {}, `Urlaub und Sonderurlaub (${vac.length})`),
@@ -954,7 +954,7 @@ async function renderAbsencesMgr() {
           h('td', {}, a.note, a.decision_note ? h('div', { class: 'small muted' }, a.decision_note) : null),
           h('td', {}, h('button', { class: 'tiny danger', onclick: async () => {
             if (!confirm(`${typeLabel(a)} von ${a.name} (${range(a)}) löschen?`)) return;
-            try { await api('DELETE', `/api/absences/${a.id}`); toast('Gelöscht.'); refresh(); } catch (e) { toast(e.message, true); }
+            try { await api('DELETE', `api/absences/${a.id}`); toast('Gelöscht.'); refresh(); } catch (e) { toast(e.message, true); }
           } }, 'Löschen')))))))
         : h('p', { class: 'muted' }, 'Keiner.')),
     h('div', { class: 'card' }, h('h2', {}, 'Abwesenheit direkt eintragen'),
@@ -969,7 +969,7 @@ const LOG_LABEL = {
   'attachment.upload': 'AU hochgeladen',
 };
 async function renderLog() {
-  const rows = await api('GET', '/api/log?limit=300');
+  const rows = await api('GET', 'api/log?limit=300');
   setMain(h('div', { class: 'card' }, h('h2', {}, 'Protokoll: Ein- und Austragungen, Abwesenheiten'),
     h('p', { class: 'small muted' }, 'Die letzten 300 Einträge, neueste zuerst.'),
     h('div', { class: 'table-wrap' }, h('table', {},
@@ -992,7 +992,7 @@ function authShell(...children) {
 }
 
 async function cancelLogin() {
-  await api('POST', '/api/logout').catch(() => {});
+  await api('POST', 'api/logout').catch(() => {});
   renderLogin();
 }
 
@@ -1006,7 +1006,7 @@ function renderCodeStep() {
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     try {
-      const r = await api('POST', '/api/login/2fa', { code: input.value });
+      const r = await api('POST', 'api/login/2fa', { code: input.value });
       if (r.used_recovery) {
         alert(`Sie haben sich mit einem Wiederherstellungscode angemeldet. Noch ${r.user.recovery_left} Codes übrig.\n\n`
           + 'Bitte richten Sie unter „Sicherheit“ neue Codes ein oder lassen Sie die 2FA von der Einsatzplanung zurücksetzen.');
@@ -1031,14 +1031,14 @@ function renderCodeStep() {
 /** Einrichtung des zweiten Faktors – bei der ersten Anmeldung (inApp=false) oder unter „Sicherheit“ */
 async function renderSetup(inApp) {
   let data;
-  try { data = await api('POST', '/api/2fa/setup'); } catch (e) { if (!inApp) renderLogin(); else toast(e.message, true); return; }
+  try { data = await api('POST', 'api/2fa/setup'); } catch (e) { if (!inApp) renderLogin(); else toast(e.message, true); return; }
   const input = h('input', { inputmode: 'numeric', autocomplete: 'one-time-code', required: true, placeholder: '123456', maxlength: 6, class: 'code-input' });
   const err = h('p', { class: 'error' });
   const form = h('form', {}, h('label', {}, '3. Angezeigten Code eingeben', input), h('button', { type: 'submit' }, 'Aktivieren'), err);
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     try {
-      const r = await api('POST', '/api/2fa/enable', { code: input.value });
+      const r = await api('POST', 'api/2fa/enable', { code: input.value });
       showRecoveryCodes(r.recovery_codes, inApp ? () => go('account') : boot);
     } catch (e) { err.textContent = e.message; input.select(); }
   });
@@ -1082,7 +1082,7 @@ function showRecoveryCodes(codes, onDone) {
 
 // ---------- Sicherheit: Passwort und 2FA ----------
 async function renderAccount() {
-  const { user, settings } = await api('GET', '/api/me');
+  const { user, settings } = await api('GET', 'api/me');
   state.me = user; state.settings = settings;
   const form = h('form', { class: 'card', style: { maxWidth: '480px' } }, h('h2', {}, 'Passwort ändern'),
     h('label', {}, 'Aktuelles Passwort', h('input', { name: 'old_password', type: 'password', required: true, autocomplete: 'current-password' })),
@@ -1090,7 +1090,7 @@ async function renderAccount() {
     h('p', {}, h('button', { type: 'submit' }, 'Ändern')));
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
-    try { await api('POST', '/api/me/password', Object.fromEntries(new FormData(form))); toast('Passwort geändert.'); form.reset(); } catch (e) { toast(e.message, true); }
+    try { await api('POST', 'api/me/password', Object.fromEntries(new FormData(form))); toast('Passwort geändert.'); form.reset(); } catch (e) { toast(e.message, true); }
   });
 
   const askCode = (question) => {
@@ -1104,7 +1104,7 @@ async function renderAccount() {
           h('button', { class: 'ghost', onclick: async () => {
             const code = askCode('Neue Wiederherstellungscodes erzeugen? Die alten werden ungültig.');
             if (!code) return;
-            try { const r = await api('POST', '/api/2fa/recovery-codes', { code }); showRecoveryCodes(r.recovery_codes, () => go('account')); } catch (e) { toast(e.message, true); }
+            try { const r = await api('POST', 'api/2fa/recovery-codes', { code }); showRecoveryCodes(r.recovery_codes, () => go('account')); } catch (e) { toast(e.message, true); }
           } }, 'Neue Wiederherstellungscodes'),
           h('button', { class: 'ghost', onclick: () => {
             if (confirm('Neues Handy einrichten? Danach gilt nur noch der neue QR-Code.')) renderSetup(true);
@@ -1112,7 +1112,7 @@ async function renderAccount() {
           !settings.zwei_faktor_pflicht ? h('button', { class: 'danger', onclick: async () => {
             const code = askCode('Zwei-Faktor-Anmeldung deaktivieren?');
             if (!code) return;
-            try { await api('POST', '/api/2fa/disable', { code }); toast('Deaktiviert.'); renderAccount(); } catch (e) { toast(e.message, true); }
+            try { await api('POST', 'api/2fa/disable', { code }); toast('Deaktiviert.'); renderAccount(); } catch (e) { toast(e.message, true); }
           } }, 'Deaktivieren') : null)]
       : [h('p', {}, h('span', { class: 'badge warn' }, 'nicht eingerichtet')),
         h('p', {}, h('button', { onclick: () => renderSetup(true) }, 'Jetzt einrichten'))]);
@@ -1121,7 +1121,7 @@ async function renderAccount() {
 
 // Als App installierbar (Startbildschirm); der Service Worker speichert nur die Programmdateien, keine Personaldaten
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
 boot();

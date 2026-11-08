@@ -20,7 +20,10 @@ class HttpError extends Error {
 
 function createApp(db, opts = {}) {
   const uploadDir = opts.uploadDir || path.join(process.cwd(), 'data', 'uploads');
-  const app = express();
+  // Optional: Betrieb in einem Unterordner, z. B. BASE_PATH=/LWL → https://domain.de/LWL/
+  const base = String(opts.basePath ?? process.env.BASE_PATH ?? '').trim().replace(/\/+$/, '').replace(/^(?!\/)(.)/, '/$1');
+  const cookiePath = base ? `${base}/` : '/';
+  const app = express.Router();
   app.use(express.json({ limit: '1mb' }));
   app.use(express.static(path.join(__dirname, '..', 'public')));
 
@@ -96,7 +99,7 @@ function createApp(db, opts = {}) {
     const ttl = stage === 'full' ? SESSION_HOURS * 3600e3 : PENDING_MIN * 60e3;
     db.prepare('DELETE FROM sessions WHERE expires < ?').run(Date.now());
     db.prepare('INSERT INTO sessions (token, user_id, expires, stage) VALUES (?, ?, ?, ?)').run(token, userId, Date.now() + ttl, stage);
-    res.setHeader('Set-Cookie', `sid=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.round(ttl / 1000)}${secureFlag}`);
+    res.setHeader('Set-Cookie', `sid=${token}; HttpOnly; SameSite=Strict; Path=${cookiePath}; Max-Age=${Math.round(ttl / 1000)}${secureFlag}`);
     return token;
   };
   const secureFlag = process.env.COOKIE_SECURE === '1' ? '; Secure' : '';
@@ -218,7 +221,7 @@ function createApp(db, opts = {}) {
 
   app.post('/api/logout', wrap((req, res) => {
     if (req.token) db.prepare('DELETE FROM sessions WHERE token = ?').run(req.token);
-    res.setHeader('Set-Cookie', 'sid=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
+    res.setHeader('Set-Cookie', `sid=; HttpOnly; SameSite=Strict; Path=${cookiePath}; Max-Age=0`);
     return { ok: true };
   }));
 
@@ -947,7 +950,19 @@ function createApp(db, opts = {}) {
     res.status(status).json({ error: status >= 500 ? 'Interner Fehler.' : err.message, code: err.code });
   });
 
-  return app;
+  const root = express();
+  root.disable('x-powered-by');
+  if (base) {
+    // /LWL → /LWL/ (damit relative Pfade stimmen); Startseite der Domain → Dienstplan
+    root.use((req, res, next) => {
+      if (req.path === base || req.path === '/') return res.redirect(302, `${base}/`);
+      next();
+    });
+    root.use(base, app);
+  } else {
+    root.use(app);
+  }
+  return root;
 }
 
 module.exports = { createApp };

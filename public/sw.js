@@ -1,7 +1,8 @@
 /* Service Worker: speichert nur die Programmdateien (App-Hülle), damit die App schnell startet.
    Dienstplan- und Personaldaten (/api/...) werden NIE zwischengespeichert. */
-const CACHE = 'pep-v4';
-const SHELL = ['/', '/index.html', '/app.js', '/style.css', '/icon.svg', '/manifest.webmanifest'];
+const CACHE = 'pep-v5';
+const SHELL = ['./', 'index.html', 'app.js', 'style.css', 'icon.svg', 'manifest.webmanifest'];
+const API = new URL('api/', self.registration.scope).pathname;
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -14,10 +15,10 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith('/api/')) return;
+  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith(API)) return;
   // Netz zuerst (immer aktuelle Version), bei Funkloch die gespeicherte Hülle
   e.respondWith(fetch(e.request).then((res) => {
     if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); }
     return res;
-  }).catch(() => caches.match(e.request).then((r) => r || caches.match('/'))));
+  }).catch(() => caches.match(e.request).then((r) => r || caches.match('./'))));
 });

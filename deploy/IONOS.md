@@ -102,3 +102,12 @@ nicht laufen. Webhosting kann kein Node.js. Lösung:
    Dann führt **https://roboticstarter.de/LWL** automatisch zu **https://lwl.roboticstarter.de**.
 
 Die Hauptseite `roboticstarter.de` bleibt dabei unverändert.
+
+## Beispiel: Hauptdomain zeigt auf den Server, Dienstplan unter `/LWL`
+
+Zeigt die Hauptdomain (z. B. `roboticstarter.de`) per A-Eintrag direkt auf den vServer, läuft der Dienstplan
+ohne Subdomain unter **https://roboticstarter.de/LWL**:
+
+- Beim Installationsskript als Adresse **`roboticstarter.de`** und als Unterordner **`/LWL`** eingeben.
+- Ein Aufruf von `https://roboticstarter.de` führt automatisch zu `/LWL/`.
+- Die Weiterleitungsdateien aus `deploy/webspace-LWL/` werden dann **nicht** gebraucht.

@@ -145,6 +145,7 @@ die Voraussetzung und sollte Pflicht bleiben. Die Installation als App funktioni
 | `PORT` | HTTP-Port | `3000` |
 | `DB_FILE` | Pfad der SQLite-Datenbank | `data/personaleinsatz.db` |
 | `MANAGER_PASSWORD` | Startpasswort des Managers bei der ersten Einrichtung | `manager123` |
+| `BASE_PATH` | Unterordner, z. B. `/LWL` → `https://domain.de/LWL/` | leer |
 | `UPLOAD_DIR` | Ablage der hochgeladenen AU-Bescheinigungen | `data/uploads` |
 | `COOKIE_SECURE` | `1` = Anmelde-Cookie nur über HTTPS senden (im Echtbetrieb setzen) | `0` |
 | `SEED_DEMO` | `0` = ohne Demo-Stationen, Demo-Dienste und Demo-Personal starten | `1` |
