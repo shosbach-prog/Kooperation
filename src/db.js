@@ -262,6 +262,7 @@ function migrate(db) {
   add('users', 'stammbereich_id INTEGER');
   add('users', "admin_rechte TEXT NOT NULL DEFAULT 'keine'");
   add('users', 'foto_version INTEGER NOT NULL DEFAULT 0');
+  add('users', "ical_token TEXT NOT NULL DEFAULT ''");
   add('units', "kuerzel TEXT NOT NULL DEFAULT ''");
   add('units', "telefon TEXT NOT NULL DEFAULT ''");
   add('units', 'leitung_id INTEGER');
