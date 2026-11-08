@@ -84,3 +84,21 @@ Die Befehle sind auf IONOS identisch.
   (my.ionos.de → Vertrag und Rechnung bzw. Datenschutz-Center).
   Beim Server ein Rechenzentrum in **Deutschland** wählen.
 - **Datenschutzbeauftragte/n, IT und Personalrat der LWL-Klinik einbinden.** Bis dahin nur mit Testdaten arbeiten.
+
+---
+
+## Beispiel: Domain im IONOS-Webhosting, Dienstplan unter `/LWL`
+
+Wenn die Hauptdomain (z. B. `roboticstarter.de`) im **IONOS-Webhosting** liegt, kann das Programm dort
+nicht laufen. Webhosting kann kein Node.js. Lösung:
+
+1. **Subdomain auf den Server zeigen lassen:** my.ionos.de → **Domains & SSL** → `roboticstarter.de` →
+   **DNS** → **Datensatz hinzufügen** → Typ **A**, Hostname `lwl`, Zeigt auf = **IP des Servers**.
+   Gibt es für `lwl` schon einen Eintrag (z. B. CNAME), diesen vorher löschen.
+2. Beim Installationsskript als Adresse **`lwl.roboticstarter.de`** eingeben.
+3. **Ordner `/LWL` als Weiterleitung:** Die beiden Dateien aus
+   [`deploy/webspace-LWL/`](webspace-LWL/) (`.htaccess` und `index.html`) per Webspace-Explorer
+   oder FTP in den Ordner **`LWL`** im Webspace hochladen.
+   Dann führt **https://roboticstarter.de/LWL** automatisch zu **https://lwl.roboticstarter.de**.
+
+Die Hauptseite `roboticstarter.de` bleibt dabei unverändert.

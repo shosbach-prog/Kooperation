@@ -1,0 +1,4 @@
+# Weiterleitung von https://roboticstarter.de/LWL auf den Dienstplan-Server
+# Diese Datei in den Ordner "LWL" im IONOS-Webspace hochladen.
+RewriteEngine On
+RewriteRule ^(.*)$ https://lwl.roboticstarter.de/$1 [R=302,L]
