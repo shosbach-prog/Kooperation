@@ -195,3 +195,28 @@ test('Profilfoto hochladen, anzeigen, entfernen', async () => {
   assert.equal((await haupt('DELETE', `/api/users/${tobias.id}/foto`)).data.foto_version, 0);
   assert.equal((await c.raw('GET', `/api/users/${tobias.id}/foto`)).status, 404);
 });
+
+test('Campus: Gebäude anlegen, Stationen zuordnen, löschen', async () => {
+  let r = await haupt('GET', '/api/buildings');
+  assert.ok(r.data.some((b) => b.name === 'Haus A')); // Demo-Daten
+  r = await haupt('POST', '/api/buildings', { name: 'Haus C – Tagesklinik', kuerzel: 'C', beschreibung: 'Eingang Süd' });
+  assert.equal(r.status, 200);
+  const haus = r.data;
+  assert.equal((await haupt('POST', '/api/buildings', { name: 'haus c – tagesklinik' })).status, 409);
+  r = await haupt('POST', '/api/units', { name: 'Tagesklinik 1', building_id: haus.id });
+  assert.equal(r.data.building_name, 'Haus C – Tagesklinik');
+  const unitId = r.data.id;
+  r = (await haupt('GET', '/api/buildings')).data.find((b) => b.id === haus.id);
+  assert.equal(r.stationen, 1);
+  assert.equal((await haupt('PUT', `/api/units/${unitId}`, { building_id: 99999 })).status, 400);
+  // Mitarbeitende sehen den Campus, dürfen ihn aber nicht ändern
+  const c = client();
+  await login(c, 'twagner', 'demo123'); // normale Mitarbeiterin ohne Verwaltungsrechte
+  assert.equal((await c('GET', '/api/buildings')).status, 200);
+  assert.equal((await c('POST', '/api/buildings', { name: 'X' })).status, 403);
+  // Gebäude löschen: Station bleibt, ohne Gebäude
+  r = await haupt('DELETE', `/api/buildings/${haus.id}`);
+  assert.equal(r.data.stationen, 1);
+  const unit = (await haupt('GET', '/api/units')).data.find((u) => u.id === unitId);
+  assert.equal(unit.building_id, null);
+});

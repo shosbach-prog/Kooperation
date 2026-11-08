@@ -449,9 +449,10 @@ function createApp(db, opts = {}) {
   }));
 
   // ---------- Bereiche / Stationen ----------
-  const loadUnits = () => db.prepare(`SELECT un.*, l.name AS leitung_name,
+  const loadUnits = () => db.prepare(`SELECT un.*, l.name AS leitung_name, b.name AS building_name, b.kuerzel AS building_kuerzel,
       (SELECT COUNT(*) FROM users x WHERE x.stammbereich_id = un.id AND x.active = 1) AS personal
-    FROM units un LEFT JOIN users l ON l.id = un.leitung_id ORDER BY un.active DESC, un.name`).all();
+    FROM units un LEFT JOIN users l ON l.id = un.leitung_id LEFT JOIN buildings b ON b.id = un.building_id
+    ORDER BY un.active DESC, COALESCE(b.sort, 9999), b.name, un.name`).all();
   const unitFields = (b, cur = {}) => {
     const v = { ...cur, ...b };
     const name = String(v.name ?? '').trim().slice(0, 80);
@@ -459,17 +460,19 @@ function createApp(db, opts = {}) {
     const dup = db.prepare('SELECT id FROM units WHERE lower(name) = lower(?) AND id <> ?').get(name, cur.id || 0);
     if (dup) throw new HttpError(409, 'Eine Station mit diesem Namen gibt es schon.');
     const leitung = v.leitung_id ? Number(v.leitung_id) : null;
+    const building = v.building_id ? Number(v.building_id) : null;
+    if (building !== null && !db.prepare('SELECT 1 FROM buildings WHERE id = ?').get(building)) throw new HttpError(400, 'Gebäude nicht gefunden.');
     if (leitung !== null && !db.prepare('SELECT 1 FROM users WHERE id = ?').get(leitung)) throw new HttpError(400, 'Stationsleitung nicht gefunden.');
     return {
       name, kuerzel: String(v.kuerzel ?? '').trim().slice(0, 10), telefon: String(v.telefon ?? '').trim().slice(0, 40),
-      leitung_id: leitung, active: v.active === undefined ? 1 : (v.active ? 1 : 0),
+      leitung_id: leitung, building_id: building, active: v.active === undefined ? 1 : (v.active ? 1 : 0),
     };
   };
   app.get('/api/units', auth, wrap(() => loadUnits()));
   app.post('/api/units', auth, manager, wrap((req) => {
     const f = unitFields(req.body || {});
-    const id = db.prepare('INSERT INTO units (name, kuerzel, telefon, leitung_id, active) VALUES (?, ?, ?, ?, ?)')
-      .run(f.name, f.kuerzel, f.telefon, f.leitung_id, f.active).lastInsertRowid;
+    const id = db.prepare('INSERT INTO units (name, kuerzel, telefon, leitung_id, building_id, active) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(f.name, f.kuerzel, f.telefon, f.leitung_id, f.building_id, f.active).lastInsertRowid;
     // Mindestbesetzung von einer bestehenden Station übernehmen
     let kopiert = 0;
     if (req.body.copy_from) {
@@ -486,8 +489,8 @@ function createApp(db, opts = {}) {
     const cur = db.prepare('SELECT * FROM units WHERE id = ?').get(id);
     if (!cur) throw new HttpError(404, 'Station nicht gefunden.');
     const f = unitFields(req.body || {}, cur);
-    db.prepare('UPDATE units SET name = ?, kuerzel = ?, telefon = ?, leitung_id = ?, active = ? WHERE id = ?')
-      .run(f.name, f.kuerzel, f.telefon, f.leitung_id, f.active, id);
+    db.prepare('UPDATE units SET name = ?, kuerzel = ?, telefon = ?, leitung_id = ?, building_id = ?, active = ? WHERE id = ?')
+      .run(f.name, f.kuerzel, f.telefon, f.leitung_id, f.building_id, f.active, id);
     audit(req.user.id, 'unit.update', { id, ...f, alt: cur.name });
     return loadUnits().find((u) => u.id === id);
   }));
@@ -499,6 +502,52 @@ function createApp(db, opts = {}) {
     db.prepare('DELETE FROM units WHERE id = ?').run(id);
     audit(req.user.id, 'unit.delete', { id });
     return { ok: true };
+  }));
+
+  // ---------- Campus: Gebäude / Häuser ----------
+  const loadBuildings = () => db.prepare(`SELECT b.*,
+      (SELECT COUNT(*) FROM units u WHERE u.building_id = b.id AND u.active = 1) AS stationen,
+      (SELECT COUNT(*) FROM users x JOIN units u ON u.id = x.stammbereich_id WHERE u.building_id = b.id AND x.active = 1) AS personal
+    FROM buildings b ORDER BY b.active DESC, b.sort, b.name`).all();
+  const buildingFields = (b, cur = {}) => {
+    const v = { ...cur, ...b };
+    const name = String(v.name ?? '').trim().slice(0, 80);
+    if (!name) throw new HttpError(400, 'Bitte einen Namen für das Gebäude angeben.');
+    if (db.prepare('SELECT 1 FROM buildings WHERE lower(name) = lower(?) AND id <> ?').get(name, cur.id || 0)) {
+      throw new HttpError(409, 'Ein Gebäude mit diesem Namen gibt es schon.');
+    }
+    const sort = Number(v.sort ?? 0);
+    return {
+      name, kuerzel: String(v.kuerzel ?? '').trim().slice(0, 10), beschreibung: String(v.beschreibung ?? '').trim().slice(0, 300),
+      sort: Number.isFinite(sort) ? Math.round(sort) : 0, active: v.active === undefined ? 1 : (v.active ? 1 : 0),
+    };
+  };
+  app.get('/api/buildings', auth, wrap(() => loadBuildings()));
+  app.post('/api/buildings', auth, manager, wrap((req) => {
+    const f = buildingFields(req.body || {});
+    if (!('sort' in (req.body || {}))) f.sort = (db.prepare('SELECT MAX(sort) AS m FROM buildings').get().m || 0) + 1;
+    const id = db.prepare('INSERT INTO buildings (name, kuerzel, beschreibung, sort, active) VALUES (?, ?, ?, ?, ?)')
+      .run(f.name, f.kuerzel, f.beschreibung, f.sort, f.active).lastInsertRowid;
+    audit(req.user.id, 'building.create', { id, ...f });
+    return loadBuildings().find((b) => b.id === id);
+  }));
+  app.put('/api/buildings/:id', auth, manager, wrap((req) => {
+    const id = Number(req.params.id);
+    const cur = db.prepare('SELECT * FROM buildings WHERE id = ?').get(id);
+    if (!cur) throw new HttpError(404, 'Gebäude nicht gefunden.');
+    const f = buildingFields(req.body || {}, cur);
+    db.prepare('UPDATE buildings SET name = ?, kuerzel = ?, beschreibung = ?, sort = ?, active = ? WHERE id = ?')
+      .run(f.name, f.kuerzel, f.beschreibung, f.sort, f.active, id);
+    audit(req.user.id, 'building.update', { id, ...f, alt: cur.name });
+    return loadBuildings().find((b) => b.id === id);
+  }));
+  app.delete('/api/buildings/:id', auth, manager, wrap((req) => {
+    const id = Number(req.params.id);
+    // Stationen bleiben erhalten und sind danach keinem Gebäude zugeordnet
+    const n = Number(db.prepare('UPDATE units SET building_id = NULL WHERE building_id = ?').run(id).changes);
+    db.prepare('DELETE FROM buildings WHERE id = ?').run(id);
+    audit(req.user.id, 'building.delete', { id, stationen: n });
+    return { ok: true, stationen: n };
   }));
 
   // ---------- Profilfotos ----------
@@ -853,7 +902,7 @@ function createApp(db, opts = {}) {
   app.get('/api/log', auth, manager, wrap((req) => {
     const limit = Math.min(Number(req.query.limit) || 200, 1000);
     const rows = db.prepare(`SELECT * FROM audit_log WHERE action IN ('assignment.add','assignment.remove','absence.create','absence.decide',
-      'absence.update','absence.delete','attachment.upload','user.rights','user.create','unit.create','unit.update','unit.delete') ORDER BY id DESC LIMIT ?`).all(limit);
+      'absence.update','absence.delete','attachment.upload','user.rights','user.create','unit.create','unit.update','unit.delete','building.create','building.update','building.delete') ORDER BY id DESC LIMIT ?`).all(limit);
     const userName = new Map(db.prepare('SELECT id, name FROM users').all().map((u) => [u.id, u.name]));
     const shiftInfo = db.prepare(`SELECT s.date, st.code, u.name AS unit_name FROM shifts s JOIN shift_types st ON st.id = s.shift_type_id
       JOIN units u ON u.id = s.unit_id WHERE s.id = ?`);

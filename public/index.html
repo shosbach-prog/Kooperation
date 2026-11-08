@@ -18,10 +18,12 @@
   <header id="topbar" hidden>
     <div class="brand"><span class="brand-mark" id="brand-mark"><span class="logo">⊕</span></span>
       <span class="brand-text"><span id="clinic-name"></span><span class="brand-sub" id="brand-sub"></span></span></div>
-    <nav id="tabs"></nav>
+    <nav id="tabs" aria-label="Hauptmenü"></nav>
     <div class="who"><span id="who"></span> <button id="logout" class="ghost">Abmelden</button></div>
   </header>
 
+  <div class="nav-backdrop" id="nav-backdrop"></div>
+  <nav id="bottomnav" aria-label="Schnellzugriff" hidden></nav>
   <main id="main"></main>
   <div id="toast" role="status" aria-live="polite"></div>
 

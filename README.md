@@ -7,7 +7,7 @@ Arbeitszeit wird angelehnt an den **TVöD (BT-K)** angerechnet.
 
 **Einsatzplanung (Manager)**
 - **Dienstzeiten** festlegen (z. B. Früh-, Spät- und Nachtdienst) mit Beginn, Ende und Pause, auch über Mitternacht
-- **Stationen** anlegen, umbenennen, deaktivieren, mit Kürzel, Telefon und Stationsleitung; Mindestbesetzung beim Anlegen von einer anderen Station übernehmen. Bisher hieß das „Bereiche/Stationen verwalten“
+- **Campus & Stationen:** Gebäude/Häuser anlegen (Name, Kürzel, Lage, Reihenfolge) und Stationen darin verwalten (Name, Kürzel, Telefon, Stationsleitung, aktiv); beim Anlegen einer Station die Mindestbesetzung von einer anderen übernehmen. Dienstplan und Personal lassen sich nach „Gebäude – alle Stationen“ oder einzelner Station filtern
 - **Mindestbesetzung** (und optionale Höchstbesetzung) je Station, Dienst und Wochentag festlegen
 - **Mindestbesetzung nach Qualifikation**, z. B. „in jedem Dienst mindestens 1 Pflegefachkraft“, wahlweise je Station und/oder Dienst
 - **Qualifikationen** frei konfigurierbar (Einstellungen)
@@ -43,7 +43,10 @@ Arbeitszeit wird angelehnt an den **TVöD (BT-K)** angerechnet.
 - Sichtbar nur für angemeldete Kolleginnen und Kollegen (Dienstplan, Personalliste, Personalakte)
 
 **Auf dem privaten Handy**
-- Die Oberfläche passt sich an das Handy an: Dienstplan als **Tagesansicht** mit Wochenleiste (grüner Punkt = eigener Dienst, roter Punkt = Lücke), große Schaltflächen, Listen als Karten
+- Die Oberfläche ist für **Handy, Tablet und PC** gestaltet: am PC Seitenleiste mit Menü, auf Handy und Tablet eine Menüleiste unten mit den wichtigsten Punkten und „Menü“ für alles Weitere
+- Dienstplan auf Handy und Tablet hochkant als **Tagesansicht** mit Wochenleiste (grüner Punkt = eigener Dienst, roter Punkt = Lücke), am PC als Wochenraster mit feststehender Kopfzeile und Dienstspalte
+- Tabellen werden automatisch zu Karten, wenn sie nicht in die Breite passen; Eingabedialoge fahren auf dem Handy von unten ein; große Tippflächen (≥ 44 px), keine Zoom-Sprünge auf dem iPhone
+- Zurück-Taste bzw. Zurück-Geste wechselt zwischen den Ansichten
 - **Als App installierbar:** iPhone (Safari → Teilen → „Zum Home-Bildschirm“) bzw. Android (Chrome → Menü → „App installieren“); keine App-Store-Installation nötig
 - Es werden **keine Dienstplan- oder Personaldaten auf dem Handy gespeichert**; offline zeigt die App nur die leere Hülle
 - AU-Bescheinigung direkt mit der Handykamera fotografieren und hochladen

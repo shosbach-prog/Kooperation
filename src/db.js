@@ -75,6 +75,15 @@ CREATE TABLE IF NOT EXISTS sessions (
   stage TEXT NOT NULL DEFAULT 'full'
 );
 
+CREATE TABLE IF NOT EXISTS buildings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  kuerzel TEXT NOT NULL DEFAULT '',
+  beschreibung TEXT NOT NULL DEFAULT '',
+  sort INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1
+);
+
 CREATE TABLE IF NOT EXISTS units (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
@@ -179,9 +188,12 @@ function seed(db, withDemo) {
 
   if (!withDemo) return;
 
-  const insUnit = db.prepare('INSERT INTO units (name) VALUES (?)');
-  const u1 = insUnit.run('Station 1').lastInsertRowid;
-  const u2 = insUnit.run('Station 2').lastInsertRowid;
+  const insBuilding = db.prepare('INSERT INTO buildings (name, kuerzel, sort) VALUES (?, ?, ?)');
+  const hausA = insBuilding.run('Haus A', 'A', 1).lastInsertRowid;
+  insBuilding.run('Haus B', 'B', 2);
+  const insUnit = db.prepare('INSERT INTO units (name, building_id) VALUES (?, ?)');
+  const u1 = insUnit.run('Station 1', hausA).lastInsertRowid;
+  const u2 = insUnit.run('Station 2', hausA).lastInsertRowid;
 
   const insType = db.prepare('INSERT INTO shift_types (name, code, start_time, end_time, break_min, color) VALUES (?, ?, ?, ?, ?, ?)');
   const f = insType.run('Frühdienst', 'F', '06:00', '14:30', 30, '#e9a23b').lastInsertRowid;
@@ -242,6 +254,7 @@ function migrate(db) {
   add('units', "kuerzel TEXT NOT NULL DEFAULT ''");
   add('units', "telefon TEXT NOT NULL DEFAULT ''");
   add('units', 'leitung_id INTEGER');
+  add('units', 'building_id INTEGER REFERENCES buildings(id) ON DELETE SET NULL');
   // Abwesenheitsarten erweitern (CHECK-Bedingung erfordert Neuaufbau der Tabelle)
   const absSql = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'absences'").get()?.sql || '';
   if (!absSql.includes('zusatzurlaub')) {

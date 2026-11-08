@@ -67,7 +67,7 @@ function setMain(...nodes) {
   stackTables(main());
 }
 
-/** Tabellen auf dem Handy als Karten darstellen: Spaltenüberschrift je Zelle hinterlegen */
+/** Tabellen: Spaltenüberschrift je Zelle hinterlegen und – wo nötig – als Karten darstellen */
 function stackTables(root) {
   for (const table of root.querySelectorAll('table:not(.plan)')) {
     const heads = [...table.querySelectorAll('thead th')].map((th) => th.textContent);
@@ -76,7 +76,25 @@ function stackTables(root) {
       [...tr.children].forEach((td, i) => { if (heads[i]) td.dataset.label = heads[i]; });
     }
   }
+  requestAnimationFrame(() => fitTables(root));
 }
+
+/** Entscheidet je Tabelle: normale Tabelle oder Karten (abhängig von Bildschirm- und Tabellenbreite) */
+function fitTables(root = main()) {
+  const W = window.innerWidth;
+  for (const table of root.querySelectorAll('table.stack')) {
+    const rows = table.tBodies[0]?.rows.length || 0;
+    const single = rows === 1 && (table.tHead?.rows[0]?.cells.length || 0) > 6 && !table.classList.contains('keep-table');
+    table.classList.remove('as-cards', 'single');
+    if (table.classList.contains('keep-table') && W >= 760) continue;
+    const wrap = table.parentElement;
+    const tooWide = table.scrollWidth > (wrap?.clientWidth || W) + 4;
+    if (W < 760 || single || (W < 1100 && tooWide)) table.classList.add('as-cards');
+    if (single && W >= 760) table.classList.add('single');
+  }
+}
+let fitTimer;
+window.addEventListener('resize', () => { clearTimeout(fitTimer); fitTimer = setTimeout(() => fitTables(), 150); });
 
 // ---------- Erscheinungsbild der Einrichtung ----------
 const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
@@ -110,8 +128,14 @@ function fillLoginBrand(el) {
 }
 
 // ---------- Anmeldung ----------
-function renderLogin() {
+function hideAppChrome() {
   document.getElementById('topbar').hidden = true;
+  document.getElementById('bottomnav').hidden = true;
+  document.body.classList.remove('app', 'nav-open');
+}
+
+function renderLogin() {
+  hideAppChrome();
   const node = document.getElementById('login-tpl').content.cloneNode(true);
   setMain(node);
   fillLoginBrand(main().querySelector('.login-brand'));
@@ -129,30 +153,96 @@ function renderLogin() {
 }
 
 // ---------- Navigation ----------
-const VIEWS = {
-  plan: { label: 'Dienstplan', render: renderPlan },
-  mine: { label: 'Meine Dienste', render: renderMine, staff: true },
-  abwesenheit: { label: 'Urlaub & Krank', render: renderMyAbsences, staff: true },
-  abwesenheiten: { label: 'Abwesenheiten', render: renderAbsencesMgr, mgr: true, badge: 'abwesenheiten' },
-  konto: { label: 'Stundenkonto', render: renderKonto, staff: true },
-  generate: { label: 'Plan erzeugen', render: renderGenerate, mgr: true },
-  staff: { label: 'Personal', render: renderStaff, mgr: true },
-  stationen: { label: 'Stationen', render: renderStations, mgr: true },
-  types: { label: 'Dienstzeiten', render: renderShiftTypes, mgr: true },
-  req: { label: 'Mindestbesetzung', render: renderRequirements, mgr: true },
-  report: { label: 'Auswertung TVöD', render: renderReport, mgr: true },
-  log: { label: 'Protokoll', render: renderLog, mgr: true },
-  settings: { label: 'Einstellungen', render: renderSettings, mgr: true },
-  account: { label: 'Mein Profil', render: renderAccount },
+// ---------- Symbole (einfache Linien-Icons) ----------
+const ICON_PATHS = {
+  plan: '<rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/>',
+  mine: '<rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4M8.5 15l2.3 2.3 4.7-4.6"/>',
+  urlaub: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/>',
+  konto: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  inbox: '<path d="M3 13l2.5-8h13L21 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 13h5l1.5 2.5h5L16 13h5"/>',
+  wand: '<path d="M4 20l11-11M14 4l1 2.5L17.5 7.5 15 8.5 14 11l-1-2.5L10.5 7.5 13 6.5zM19 13l.6 1.4 1.4.6-1.4.6L19 17l-.6-1.4-1.4-.6 1.4-.6z"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><circle cx="17" cy="9" r="2.6"/><path d="M16.5 14.6c2.6.2 4.5 1.9 5 4.9"/>',
+  campus: '<path d="M3 21h18M5 21V8l7-4 7 4v13"/><path d="M9.5 21v-5h5v5M9 10.5h1.5M13.5 10.5H15"/>',
+  clock: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9 2.5h6"/>',
+  sliders: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+  chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  log: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c.8-4.2 4-6.5 8-6.5s7.2 2.3 8 6.5"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  logout: '<path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3M15 17l5-5-5-5M20 12H9"/>',
 };
+function icon(name) {
+  const span = document.createElement('span');
+  span.className = 'icon';
+  span.setAttribute('aria-hidden', 'true');
+  span.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICON_PATHS[name] || ''}</svg>`;
+  return span;
+}
+
+// ---------- Navigation ----------
+const VIEWS = {
+  plan: { label: 'Dienstplan', icon: 'plan', group: 'mein', render: renderPlan },
+  mine: { label: 'Meine Dienste', short: 'Meine', icon: 'mine', group: 'mein', render: renderMine, staff: true },
+  abwesenheit: { label: 'Urlaub & Krank', short: 'Urlaub', icon: 'urlaub', group: 'mein', render: renderMyAbsences, staff: true },
+  konto: { label: 'Stundenkonto', short: 'Stunden', icon: 'konto', group: 'mein', render: renderKonto, staff: true },
+  account: { label: 'Mein Profil', short: 'Profil', icon: 'user', group: 'mein', render: renderAccount },
+  abwesenheiten: { label: 'Abwesenheiten', short: 'Anträge', icon: 'inbox', group: 'verw', render: renderAbsencesMgr, mgr: true, badge: 'abwesenheiten' },
+  staff: { label: 'Personal', icon: 'users', group: 'verw', render: renderStaff, mgr: true },
+  stationen: { label: 'Campus & Stationen', short: 'Campus', icon: 'campus', group: 'verw', render: renderStations, mgr: true },
+  generate: { label: 'Plan erzeugen', icon: 'wand', group: 'verw', render: renderGenerate, mgr: true },
+  types: { label: 'Dienstzeiten', icon: 'clock', group: 'verw', render: renderShiftTypes, mgr: true },
+  req: { label: 'Mindestbesetzung', icon: 'sliders', group: 'verw', render: renderRequirements, mgr: true },
+  report: { label: 'Auswertung TVöD', short: 'Auswertung', icon: 'chart', group: 'verw', render: renderReport, mgr: true },
+  log: { label: 'Protokoll', icon: 'log', group: 'verw', render: renderLog, mgr: true },
+  settings: { label: 'Einstellungen', icon: 'settings', group: 'verw', render: renderSettings, mgr: true },
+};
+const GROUPS = { mein: 'Mein Dienst', verw: 'Verwaltung' };
+const viewAllowed = (v) => (v.mgr ? isMgr() : v.staff ? isStaffRole() : true);
+
+/** Schnellzugriff unten (Handy/Tablet), je nach Rolle */
+function bottomKeys() {
+  if (isMgr() && !isStaffRole()) return ['plan', 'abwesenheiten', 'staff'];
+  if (isMgr()) return ['plan', 'mine', 'abwesenheiten'];
+  return ['plan', 'mine', 'abwesenheit'];
+}
+
+function setNavOpen(open) { document.body.classList.toggle('nav-open', open); }
 
 function renderTabs() {
-  const nav = document.getElementById('tabs');
-  nav.replaceChildren(...Object.entries(VIEWS)
-    .filter(([, v]) => (v.mgr ? isMgr() : v.staff ? isStaffRole() : true))
-    .map(([key, v]) => h('button', { class: state.view === key ? 'active' : '', onclick: () => go(key) }, v.label,
-      v.badge && state.badges[v.badge] ? h('span', { class: 'tab-badge', title: 'offen' }, state.badges[v.badge]) : null)));
+  const badge = (v) => (v.badge && state.badges[v.badge] ? h('span', { class: 'tab-badge', title: 'offen' }, state.badges[v.badge]) : null);
+  const groups = Object.entries(GROUPS).map(([g, title]) => {
+    const items = Object.entries(VIEWS).filter(([, v]) => v.group === g && viewAllowed(v));
+    if (!items.length) return null;
+    return h('div', { class: 'nav-group' },
+      Object.keys(GROUPS).length > 1 ? h('div', { class: 'nav-group-title' }, title) : null,
+      items.map(([key, v]) => h('button', {
+        class: `nav-item${state.view === key ? ' active' : ''}`, 'aria-current': state.view === key ? 'page' : null,
+        onclick: () => { setNavOpen(false); go(key); },
+      }, icon(v.icon), h('span', { class: 'label' }, v.label), badge(v))));
+  });
+  document.getElementById('tabs').replaceChildren(...groups.filter(Boolean));
+
+  const keys = bottomKeys().filter((k) => VIEWS[k] && viewAllowed(VIEWS[k]));
+  const inBottom = keys.includes(state.view);
+  const anyBadge = Object.entries(VIEWS).some(([k, v]) => !keys.includes(k) && v.badge && state.badges[v.badge] && viewAllowed(v));
+  document.getElementById('bottomnav').replaceChildren(
+    ...keys.map((k) => h('button', { class: state.view === k ? 'active' : '', onclick: () => { setNavOpen(false); go(k); } },
+      icon(VIEWS[k].icon), h('span', { class: 'bn-label' }, VIEWS[k].short || VIEWS[k].label), badge(VIEWS[k]))),
+    h('button', { class: !inBottom ? 'active' : '', 'aria-expanded': String(document.body.classList.contains('nav-open')),
+      onclick: () => setNavOpen(!document.body.classList.contains('nav-open')) },
+    icon('menu'), h('span', { class: 'bn-label' }, inBottom ? 'Menü' : (VIEWS[state.view]?.short || VIEWS[state.view]?.label || 'Menü')),
+    anyBadge && !keys.some((k) => VIEWS[k].badge) ? h('span', { class: 'tab-badge' }, '!') : null));
 }
+document.getElementById('nav-backdrop').addEventListener('click', () => setNavOpen(false));
+// Zurück-/Vor-Taste des Browsers (und Zurück-Geste auf dem Handy) wechselt zwischen den Ansichten
+window.addEventListener('hashchange', () => {
+  const key = location.hash.slice(1);
+  if (!state.me || key === state.view) return;
+  if (document.querySelector('dialog[open]')) return;
+  if (VIEWS[key] && viewAllowed(VIEWS[key])) { setNavOpen(false); go(key); }
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setNavOpen(false); });
 
 /** Zähler für offene Urlaubsanträge und fehlende AU-Bescheinigungen (Manager) */
 async function refreshBadges() {
@@ -168,6 +258,7 @@ async function go(view) {
   state.view = view;
   location.hash = view;
   renderTabs();
+  window.scrollTo({ top: 0 });
   setMain(h('p', { class: 'muted' }, 'Lädt …'));
   try { await VIEWS[view].render(); } catch (e) { if (e.status !== 401) setMain(h('p', { class: 'error' }, e.message)); }
 }
@@ -183,6 +274,8 @@ async function boot() {
     return;
   }
   document.getElementById('topbar').hidden = false;
+  document.getElementById('bottomnav').hidden = false;
+  document.body.classList.add('app');
   applyBranding();
   renderWho();
   state.weekStart = state.weekStart || mondayOf(todayIso());
@@ -193,6 +286,8 @@ async function boot() {
   refreshBadges();
 }
 
+document.getElementById('logout').replaceChildren(icon('logout'), h('span', { class: 'label' }, 'Abmelden'));
+document.getElementById('logout').setAttribute('aria-label', 'Abmelden');
 document.getElementById('logout').addEventListener('click', async () => {
   await api('POST', 'api/logout').catch(() => {});
   state.me = null; location.hash = ''; renderLogin();
@@ -210,15 +305,17 @@ async function renderPlan() {
   const byKey = new Map(plan.shifts.map((s) => [`${s.date}|${s.unit_id}|${s.shift_type_id}`, s]));
   state.planAbsences = plan.absences || [];
   const staffUsers = users.filter((u) => u.active && u.role === 'staff');
-  const activeUnits = units.filter((u) => u.active && (!state.unitFilter || String(u.id) === state.unitFilter));
+  const f = String(state.unitFilter || '');
+  const activeUnits = units.filter((u) => u.active && (!f
+    || (f.startsWith('b:') ? String(u.building_id ?? 'x') === f.slice(2) || (f === 'b:none' && !u.building_id)
+      : String(u.id) === f.replace(/^u:/, ''))));
   const usedTypeIds = new Set(plan.shifts.map((s) => s.shift_type_id));
   const shownTypes = types.filter((t) => t.active || usedTypeIds.has(t.id));
 
-  const unitSelect = h('select', { onchange: (e) => { state.unitFilter = e.target.value; renderPlan(); } },
-    h('option', { value: '' }, 'Alle Bereiche'),
-    units.filter((u) => u.active).map((u) => h('option', { value: u.id, selected: String(u.id) === state.unitFilter }, u.name)));
+  const unitSelect = unitFilterSelect(units, f, (v) => { state.unitFilter = v; renderPlan(); });
 
   const kw = isoWeek(from);
+  const today = todayIso();
   const toolbar = h('div', { class: 'toolbar' },
     h('button', { class: 'ghost', onclick: () => { state.weekStart = addDays(from, -7); renderPlan(); } }, '‹ Vorwoche'),
     h('button', { class: 'ghost', onclick: () => { state.weekStart = mondayOf(todayIso()); renderPlan(); } }, 'Heute'),
@@ -235,14 +332,20 @@ async function renderPlan() {
     const wd = weekday(d); const hol = plan.holidays[d];
     const abs = absentOn(d);
     const mineAbs = abs.find((a) => a.user_id === state.me.id);
-    return h('th', { class: `day${wd === 0 || wd === 6 ? ' weekend' : ''}${hol ? ' holiday' : ''}`, title: hol || '' },
+    return h('th', { class: `day${wd === 0 || wd === 6 ? ' weekend' : ''}${hol ? ' holiday' : ''}${d === today ? ' today' : ''}`, title: hol || '' },
       `${WD[wd]} ${fmtDate(d).slice(0, 6)}`, hol ? h('div', { class: 'small' }, hol) : null,
       isMgr() && abs.length ? h('div', { class: 'small absent-info', title: abs.map((a) => `${a.name}: ${absLabel(a)}`).join('\n') }, `${abs.length} abwesend`) : null,
       !isMgr() && mineAbs ? h('div', { class: 'small absent-info' }, absLabel(mineAbs)) : null);
   }));
 
   const tbody = [];
+  let lastBuilding;
+  const multiBuildings = new Set(activeUnits.map((u) => u.building_id ?? 0)).size > 1;
   for (const unit of activeUnits) {
+    if (multiBuildings && unit.building_id !== lastBuilding) {
+      lastBuilding = unit.building_id;
+      tbody.push(h('tr', { class: 'building-row' }, h('td', { colspan: 8 }, unit.building_name || 'Ohne Gebäude')));
+    }
     tbody.push(h('tr', { class: 'unit-row' }, h('td', { colspan: 8 }, unit.name)));
     for (const t of shownTypes) {
       const rowShifts = days.map((d) => byKey.get(`${d}|${unit.id}|${t.id}`));
@@ -260,18 +363,41 @@ async function renderPlan() {
         ' können Sie Schichten aus der Mindestbesetzung anlegen.') : h('p', { class: 'muted' }, 'Die Einsatzplanung hat den Plan noch nicht freigegeben.'))
     : null;
 
-  if (isPhone()) {
+  if (dayViewQuery.matches) {
     renderPlanPhone({ from, to, days, plan, byKey, staffUsers, activeUnits, shownTypes, unitSelect, kw, empty });
     return;
   }
   setMain(h('div', { class: 'card' }, toolbar, legend, empty,
-    h('div', { class: 'table-wrap' }, h('table', { class: 'plan' }, h('thead', {}, thead), h('tbody', {}, tbody)))));
+    h('div', { class: 'plan-scroll' }, h('table', { class: 'plan' }, h('thead', {}, thead), h('tbody', {}, tbody)))));
+}
+
+/** Auswahl „Alle / Gebäude / Station“ für Dienstplan und Personal */
+function unitFilterSelect(units, value, onChange, allLabel = 'Ganzer Campus') {
+  const active = units.filter((u) => u.active);
+  const byBuilding = new Map();
+  for (const u of active) {
+    const key = u.building_id ?? 'none';
+    if (!byBuilding.has(key)) byBuilding.set(key, { name: u.building_name || 'Ohne Gebäude', units: [] });
+    byBuilding.get(key).units.push(u);
+  }
+  const opts = [h('option', { value: '' }, allLabel)];
+  if (byBuilding.size > 1 || (byBuilding.size === 1 && !byBuilding.has('none'))) {
+    for (const [key, b] of byBuilding) {
+      opts.push(h('optgroup', { label: b.name },
+        h('option', { value: `b:${key}`, selected: value === `b:${key}` }, `${b.name} – alle Stationen`),
+        b.units.map((u) => h('option', { value: `u:${u.id}`, selected: value === `u:${u.id}` || value === String(u.id) }, u.name))));
+    }
+  } else {
+    opts.push(...active.map((u) => h('option', { value: `u:${u.id}`, selected: value === `u:${u.id}` || value === String(u.id) }, u.name)));
+  }
+  return h('select', { 'aria-label': 'Bereich wählen', onchange: (e) => onChange(e.target.value) }, opts);
 }
 
 // ---------- Handyansicht: ein Tag, Dienste untereinander ----------
-const phoneQuery = window.matchMedia('(max-width: 760px)');
+const phoneQuery = window.matchMedia('(max-width: 759.98px)');
+const dayViewQuery = window.matchMedia('(max-width: 899.98px)');
 const isPhone = () => phoneQuery.matches;
-phoneQuery.addEventListener('change', () => { if (state.view === 'plan' && state.me) renderPlan(); });
+dayViewQuery.addEventListener('change', () => { if (state.view === 'plan' && state.me) renderPlan(); });
 
 function renderPlanPhone({ from, days, plan, byKey, staffUsers, activeUnits, shownTypes, unitSelect, kw, empty }) {
   if (!state.day || !days.includes(state.day)) state.day = days.includes(todayIso()) ? todayIso() : from;
@@ -282,10 +408,11 @@ function renderPlanPhone({ from, days, plan, byKey, staffUsers, activeUnits, sho
     h('button', { class: 'ghost', onclick: () => { state.weekStart = mondayOf(todayIso()); state.day = todayIso(); renderPlan(); } }, 'Heute'),
     h('button', { class: 'ghost', 'aria-label': 'Nächste Woche', onclick: () => { state.weekStart = addDays(from, 7); state.day = addDays(day, 7); renderPlan(); } }, '›'));
   const chips = h('div', { class: 'day-chips' }, days.map((d) => {
+    const isToday = d === todayIso();
     const mineHere = plan.shifts.some((s) => s.date === d && s.assigned.some((a) => a.user_id === state.me.id));
     const gap = plan.shifts.some((s) => s.date === d && (s.assigned.length < s.min_staff || s.qual_missing.length));
     return h('button', {
-      class: `day-chip${d === day ? ' active' : ''}${plan.holidays[d] ? ' holiday' : ''}`,
+      class: `day-chip${d === day ? ' active' : ''}${plan.holidays[d] ? ' holiday' : ''}${isToday ? ' today' : ''}`, 'aria-pressed': String(d === day),
       onclick: () => { state.day = d; renderPlan(); },
     }, h('span', { class: 'wd' }, WD[weekday(d)]), h('span', { class: 'dn' }, d.slice(8)),
       mineHere ? h('span', { class: 'dot mine', title: 'eigener Dienst' }) : gap ? h('span', { class: 'dot gap', title: 'unterbesetzt' }) : null);
@@ -306,7 +433,7 @@ function renderPlanPhone({ from, days, plan, byKey, staffUsers, activeUnits, sho
           h('strong', {}, t.name), h('span', { class: 'muted small' }, `${s.start_time}–${s.end_time}`)),
         renderCell(s, staffUsers));
     }).filter(Boolean);
-    return cards.length ? h('section', {}, h('h3', {}, unit.name), cards) : null;
+    return cards.length ? h('section', {}, h('h3', {}, unit.name, unit.building_name ? h('span', { class: 'muted' }, unit.building_name) : null), cards) : null;
   });
   setMain(h('div', { class: 'card phone-plan' }, nav, unitSelect, chips, empty, head,
     blocks.some(Boolean) ? blocks : (empty ? null : h('p', { class: 'muted' }, 'An diesem Tag sind keine Dienste angelegt.'))));
@@ -367,14 +494,100 @@ function renderCell(s, staffUsers) {
   return h('div', { class: `cell ${cls}` }, count, list, missing, s.note ? h('div', { class: 'note' }, s.note) : null, action);
 }
 
+// ---------- Dialoge (ersetzen prompt/confirm/alert; auf dem Handy als Einblendung von unten) ----------
+function openDialog(build) {
+  return new Promise((resolve) => {
+    const dlg = h('dialog', { class: 'ui-dialog' });
+    let done = false;
+    const close = (value) => {
+      if (done) return;
+      done = true;
+      dlg.close();
+      dlg.remove();
+      resolve(value);
+    };
+    dlg.addEventListener('cancel', (e) => { e.preventDefault(); close(null); });
+    dlg.addEventListener('click', (e) => { if (e.target === dlg) close(null); }); // Klick neben das Fenster
+    dlg.append(build(close));
+    document.body.append(dlg);
+    dlg.showModal();
+    const first = dlg.querySelector('input, textarea, select');
+    if (first && !isPhone()) first.focus();
+    else if (first && first.type !== 'date') setTimeout(() => first.focus(), 50);
+  });
+}
+
+function dialogShell(title, message, body, buttons) {
+  return h('form', { method: 'dialog', class: 'ui-dialog-body', novalidate: true },
+    title ? h('h2', {}, title) : null,
+    message ? h('p', { class: 'ui-dialog-msg' }, message) : null,
+    body,
+    h('div', { class: 'ui-dialog-actions' }, buttons));
+}
+
+function uiConfirm(message, { title = 'Bitte bestätigen', okText = 'OK', cancelText = 'Abbrechen', danger = false } = {}) {
+  return openDialog((close) => dialogShell(title, message, null, [
+    h('button', { type: 'button', class: 'ghost', onclick: () => close(false) }, cancelText),
+    h('button', { type: 'button', class: danger ? 'danger-solid' : '', onclick: () => close(true) }, okText),
+  ])).then((v) => v === true);
+}
+
+function uiAlert(message, { title = 'Hinweis', okText = 'Verstanden' } = {}) {
+  return openDialog((close) => dialogShell(title, message, null, [
+    h('button', { type: 'button', onclick: () => close(true) }, okText),
+  ]));
+}
+
+/** Formular-Dialog; fields: [{ name, label, type, value, placeholder, required, minLength, min, max, step, inputmode, rows, hint }] */
+function uiForm({ title, message, fields, okText = 'Speichern', cancelText = 'Abbrechen' }) {
+  return openDialog((close) => {
+    const inputs = {};
+    const err = h('p', { class: 'error' });
+    const rows = fields.map((f) => {
+      const attrs = {
+        name: f.name, value: f.value ?? '', placeholder: f.placeholder, required: !!f.required, min: f.min, max: f.max,
+        step: f.step, inputmode: f.inputmode, autocomplete: f.autocomplete || 'off', maxlength: f.maxlength,
+      };
+      const el = f.type === 'textarea' ? h('textarea', { ...attrs, rows: f.rows || 3 })
+        : f.type === 'select' ? h('select', { name: f.name }, (f.options || []).map(([v, l]) => h('option', { value: v, selected: String(v) === String(f.value ?? '') }, l)))
+          : h('input', { ...attrs, type: f.type || 'text' });
+      inputs[f.name] = el;
+      return h('label', {}, f.label, el, f.hint ? h('span', { class: 'small muted' }, f.hint) : null);
+    });
+    const submit = () => {
+      for (const f of fields) {
+        const v = inputs[f.name].value.trim();
+        if (f.required && !v) { err.textContent = `Bitte „${f.label}“ ausfüllen.`; inputs[f.name].focus(); return; }
+        if (f.minLength && v && v.length < f.minLength) {
+          err.textContent = `„${f.label}“: bitte mindestens ${f.minLength} Zeichen.`; inputs[f.name].focus(); return;
+        }
+      }
+      close(Object.fromEntries(fields.map((f) => [f.name, inputs[f.name].value.trim()])));
+    };
+    const form = dialogShell(title, message, h('div', { class: 'ui-dialog-fields' }, rows, err), [
+      h('button', { type: 'button', class: 'ghost', onclick: () => close(null) }, cancelText),
+      h('button', { type: 'submit' }, okText),
+    ]);
+    form.addEventListener('submit', (e) => { e.preventDefault(); submit(); });
+    return form;
+  });
+}
+
+/** Ein Eingabefeld; liefert den Text oder null bei Abbruch */
+async function uiPrompt({ title, message, label, value = '', type = 'text', required = false, minLength, placeholder, multiline = false, inputmode, okText = 'OK', hint, autocomplete }) {
+  const r = await uiForm({
+    title, message, okText,
+    fields: [{ name: 'v', label: label || '', value, type: multiline ? 'textarea' : type, required, minLength, placeholder, inputmode, hint, autocomplete }],
+  });
+  return r ? r.v : null;
+}
+
 /** Fragt eine Begründung ab; null = abgebrochen */
-function askReason(text, required) {
-  while (true) {
-    const r = prompt(`${text}${required ? '' : '\n(optional)'}`);
-    if (r === null) return null;
-    if (!required || r.trim().length >= 3) return r.trim();
-    alert('Bitte eine Begründung mit mindestens 3 Zeichen angeben.');
-  }
+function askReason(text, required, { title = 'Begründung', okText = 'Bestätigen' } = {}) {
+  return uiPrompt({
+    title, message: text, label: required ? 'Begründung' : 'Begründung (optional)', required, minLength: required ? 3 : undefined,
+    multiline: true, placeholder: 'z. B. Arzttermin, Tausch mit Kollegin …', okText,
+  });
 }
 
 async function assign(s, userId, force = false) {
@@ -382,7 +595,7 @@ async function assign(s, userId, force = false) {
   if (!userId) {
     const required = !!state.settings.begruendung_eintragen;
     if (required) {
-      const reason = askReason(`Begründung für das Eintragen in ${s.type_name} am ${fmtDate(s.date)}:`, true);
+      const reason = await askReason(`Begründung für das Eintragen in ${s.type_name} am ${fmtDate(s.date)}:`, true);
       if (reason === null) return;
       body = { reason };
     }
@@ -392,7 +605,7 @@ async function assign(s, userId, force = false) {
     toast('Eingetragen.');
   } catch (e) {
     if (isMgr() && !force && (e.code === 'RUHEZEIT' || e.code === 'VOLL')
-      && confirm(`${e.message}\n\nTrotzdem eintragen (Ausnahme durch Einsatzplanung)?`)) {
+      && await uiConfirm(`${e.message} Trotzdem eintragen (Ausnahme durch die Einsatzplanung)?`, { title: 'Ausnahme', okText: 'Trotzdem eintragen' })) {
       return assign(s, userId, true);
     }
     toast(e.message, true);
@@ -403,7 +616,7 @@ async function assign(s, userId, force = false) {
 async function unassign(s, userId, name) {
   const who = name ? `${name} aus` : 'Sich aus';
   const required = !isMgr() && !!state.settings.begruendung_austragen;
-  const reason = askReason(`${who} ${s.type_name} am ${fmtDate(s.date)} (${s.unit_name}) austragen?\n\nBegründung:`, required);
+  const reason = await askReason(`${who} ${s.type_name} am ${fmtDate(s.date)} (${s.unit_name}) austragen?`, required, { title: 'Austragen', okText: 'Austragen' });
   if (reason === null) return;
   try {
     await api('DELETE', `api/shifts/${s.id}/assign${isMgr() ? `?user_id=${userId}` : ''}`, { reason });
@@ -413,14 +626,17 @@ async function unassign(s, userId, name) {
 }
 
 async function editShift(s) {
-  const min = prompt(`Mindestbesetzung für ${s.type_name} am ${fmtDate(s.date)}:`, s.min_staff);
-  if (min === null) return;
-  const max = prompt('Höchstbesetzung (leer = unbegrenzt):', s.max_staff ?? '');
-  if (max === null) return;
-  const note = prompt('Notiz (optional):', s.note || '');
-  if (note === null) return;
+  const r = await uiForm({
+    title: `${s.type_name} · ${WD[weekday(s.date)]} ${fmtDate(s.date)}`, message: s.unit_name,
+    fields: [
+      { name: 'min', label: 'Mindestbesetzung', type: 'number', min: 0, step: 1, inputmode: 'numeric', value: s.min_staff, required: true },
+      { name: 'max', label: 'Höchstbesetzung', type: 'number', min: 0, step: 1, inputmode: 'numeric', value: s.max_staff ?? '', hint: 'leer = unbegrenzt' },
+      { name: 'note', label: 'Notiz (optional)', type: 'textarea', rows: 2, value: s.note || '', maxlength: 500 },
+    ],
+  });
+  if (!r) return;
   try {
-    await api('PUT', `api/shifts/${s.id}`, { min_staff: Number(min), max_staff: max === '' ? null : Number(max), note });
+    await api('PUT', `api/shifts/${s.id}`, { min_staff: Number(r.min), max_staff: r.max === '' ? null : Number(r.max), note: r.note });
     toast('Gespeichert.');
   } catch (e) { toast(e.message, true); }
   refresh();
@@ -483,7 +699,7 @@ function zuschlagTable(rows, withName) {
     ['zuschlag_eur', 'Zuschläge €', true],
   ];
   return h('div', { class: 'table-wrap' }, h('h3', {}, 'Stunden und Zeitzuschläge'),
-    h('table', {},
+    h('table', { class: withName ? 'sticky-first' : '' },
       h('thead', {}, h('tr', {}, cols.map(([, l, n]) => h('th', { class: n ? 'num' : '' }, l)), withName ? h('th', {}, 'Mindestverf.') : null)),
       h('tbody', {}, rows.map((r) => h('tr', {},
         cols.map(([k, , n, d]) => h('td', { class: n ? 'num' : '' }, n ? fmtNum(r[k], d ?? 2) : r[k])),
@@ -595,70 +811,127 @@ function fotoControl(u, url, onDone) {
     h('div', {}, input,
       h('button', { type: 'button', onclick: () => input.click() }, u.foto_version ? 'Foto ändern' : 'Foto hochladen'),
       u.foto_version ? h('button', { type: 'button', class: 'ghost', onclick: async () => {
-        if (!confirm('Foto entfernen?')) return;
+        if (!await uiConfirm('Das Foto wird gelöscht.', { title: 'Foto entfernen?', okText: 'Entfernen', danger: true })) return;
         try { onDone(await api('DELETE', url)); toast('Foto entfernt.'); } catch (e) { toast(e.message, true); }
       } }, 'Entfernen') : null,
       h('p', { class: 'small muted' }, 'Freiwillig. Das Foto sehen nur angemeldete Kolleginnen und Kollegen, z. B. im Dienstplan. ',
         'Auf dem Handy können Sie direkt die Kamera nutzen.')));
 }
 
-// ---------- Stationen (Verwaltung) ----------
+// ---------- Campus & Stationen (Verwaltung) ----------
 async function renderStations() {
-  const [units, users, types] = await Promise.all([api('GET', 'api/units'), api('GET', 'api/users'), api('GET', 'api/shift-types')]);
+  const [units, buildings, users, types] = await Promise.all([
+    api('GET', 'api/units'), api('GET', 'api/buildings'), api('GET', 'api/users'), api('GET', 'api/shift-types'),
+  ]);
   const people = users.filter((u) => u.active).sort((a, b) => a.name.localeCompare(b.name, 'de'));
   const leitungSelect = (cur) => h('select', {}, h('option', { value: '' }, '– keine –'),
     people.map((p) => h('option', { value: p.id, selected: p.id === cur }, `${p.name}${p.qualification ? ` (${p.qualification})` : ''}`)));
+  const buildingSelect = (cur) => h('select', {}, h('option', { value: '' }, '– ohne Gebäude –'),
+    buildings.filter((b) => b.active || b.id === cur).map((b) => h('option', { value: b.id, selected: b.id === cur }, b.name)));
+  const save = async (fn, msg) => { try { await fn(); toast(msg); renderStations(); } catch (e) { toast(e.message, true); } };
 
-  const unitCard = (u) => {
+  // --- Station (Karte mit aufklappbarer Bearbeitung) ---
+  const stationCard = (u) => {
     const name = h('input', { value: u.name, maxlength: 80, required: true });
-    const kuerzel = h('input', { value: u.kuerzel || '', maxlength: 10, placeholder: 'z. B. 1A', style: { width: '7em' } });
+    const kuerzel = h('input', { value: u.kuerzel || '', maxlength: 10, placeholder: 'z. B. 1A' });
     const telefon = h('input', { type: 'tel', value: u.telefon || '', maxlength: 40, placeholder: 'Durchwahl' });
     const leitung = leitungSelect(u.leitung_id);
+    const gebaeude = buildingSelect(u.building_id);
     const active = h('input', { type: 'checkbox', checked: !!u.active });
     return h('div', { class: `card station${u.active ? '' : ' inactive'}` },
-      h('div', { class: 'station-head' }, h('h3', {}, u.kuerzel ? `${u.name} (${u.kuerzel})` : u.name),
-        h('span', { class: 'muted small' }, `${u.personal} Person(en) mit Stammbereich`, u.leitung_name ? ` · Leitung: ${u.leitung_name}` : '')),
-      h('div', { class: 'row' }, h('label', {}, 'Name', name), h('label', {}, 'Kürzel', kuerzel), h('label', {}, 'Telefon', telefon),
-        h('label', {}, 'Stationsleitung', leitung), h('label', { class: 'check', style: { alignSelf: 'center' } }, active, 'aktiv')),
-      h('div', { class: 'toolbar' },
-        h('button', { onclick: async () => {
-          try {
-            await api('PUT', `api/units/${u.id}`, { name: name.value, kuerzel: kuerzel.value, telefon: telefon.value, leitung_id: leitung.value || null, active: active.checked });
-            toast('Station gespeichert.'); renderStations();
-          } catch (e) { toast(e.message, true); }
-        } }, 'Speichern'),
-        h('button', { class: 'ghost', onclick: () => go('req') }, 'Mindestbesetzung'),
-        h('button', { class: 'danger', onclick: async () => {
-          if (!confirm(`Station „${u.name}“ löschen?`)) return;
-          try { await api('DELETE', `api/units/${u.id}`); toast('Gelöscht.'); renderStations(); } catch (e) { toast(e.message, true); }
-        } }, 'Löschen')));
+      h('div', { class: 'station-head' }, h('h3', {}, u.kuerzel ? `${u.name} (${u.kuerzel})` : u.name), !u.active ? h('span', { class: 'badge bad' }, 'inaktiv') : null),
+      h('div', { class: 'station-meta' },
+        h('span', {}, `👥 ${u.personal} Person(en)`),
+        u.leitung_name ? h('span', {}, `Leitung: ${u.leitung_name}`) : null,
+        u.telefon ? h('a', { href: `tel:${u.telefon.replace(/[^\d+]/g, '')}` }, `☎ ${u.telefon}`) : null),
+      h('details', { class: 'edit' }, h('summary', {}, 'Bearbeiten'),
+        h('div', { class: 'row' }, h('label', {}, 'Name', name), h('label', {}, 'Kürzel', kuerzel), h('label', {}, 'Telefon', telefon),
+          h('label', {}, 'Gebäude', gebaeude), h('label', {}, 'Stationsleitung', leitung), h('label', { class: 'check' }, active, 'aktiv')),
+        h('div', { class: 'toolbar', style: { marginTop: '.75rem', marginBottom: 0 } },
+          h('button', { onclick: () => save(() => api('PUT', `api/units/${u.id}`, {
+            name: name.value, kuerzel: kuerzel.value, telefon: telefon.value, leitung_id: leitung.value || null,
+            building_id: gebaeude.value || null, active: active.checked,
+          }), 'Station gespeichert.') }, 'Speichern'),
+          h('button', { class: 'ghost', onclick: () => go('req') }, 'Mindestbesetzung'),
+          h('button', { class: 'danger', onclick: async () => {
+            if (!await uiConfirm(`Station „${u.name}“ wird gelöscht. Das geht nur, solange es dort noch keine Schichten gibt – sonst bitte deaktivieren.`,
+              { title: 'Station löschen?', okText: 'Löschen', danger: true })) return;
+            save(() => api('DELETE', `api/units/${u.id}`), 'Station gelöscht.');
+          } }, 'Löschen'))));
   };
 
-  // neue Station
-  const nName = h('input', { maxlength: 80, required: true, placeholder: 'z. B. Station 3 – Allgemeinpsychiatrie' });
-  const nKuerzel = h('input', { maxlength: 10, placeholder: 'z. B. 3', style: { width: '7em' } });
-  const nTel = h('input', { type: 'tel', maxlength: 40, placeholder: 'Durchwahl' });
-  const nLeitung = leitungSelect(null);
-  const nCopy = h('select', {}, h('option', { value: '' }, 'nein, später selbst festlegen'),
-    units.filter((u) => u.active).map((u) => h('option', { value: u.id }, `wie ${u.name}`)));
-  const newForm = h('form', { class: 'card' }, h('h2', {}, 'Neue Station anlegen'),
-    h('div', { class: 'row' }, h('label', {}, 'Name', nName), h('label', {}, 'Kürzel', nKuerzel), h('label', {}, 'Telefon', nTel),
-      h('label', {}, 'Stationsleitung', nLeitung), h('label', {}, 'Mindestbesetzung übernehmen?', nCopy)),
-    h('div', { class: 'toolbar' }, h('button', { type: 'submit' }, 'Station anlegen')),
-    types.length ? null : h('p', { class: 'small muted' }, 'Tipp: Legen Sie unter „Dienstzeiten“ auch die Dienste (Früh, Spät, Nacht) an.'));
-  newForm.addEventListener('submit', async (ev) => {
-    ev.preventDefault();
-    try {
-      const r = await api('POST', 'api/units', { name: nName.value, kuerzel: nKuerzel.value, telefon: nTel.value, leitung_id: nLeitung.value || null, copy_from: nCopy.value || null });
-      toast(r.kopiert ? `Station angelegt, Mindestbesetzung übernommen.` : 'Station angelegt. Bitte noch die Mindestbesetzung festlegen.');
-      renderStations();
-    } catch (e) { toast(e.message, true); }
-  });
+  // --- Neue Station (Dialog), optional schon einem Gebäude zugeordnet ---
+  const newStation = async (buildingId) => {
+    const r = await uiForm({
+      title: 'Neue Station',
+      message: buildingId ? `Gebäude: ${buildings.find((b) => b.id === buildingId)?.name}` : '',
+      okText: 'Anlegen',
+      fields: [
+        { name: 'name', label: 'Name', required: true, placeholder: 'z. B. Station 3 – Allgemeinpsychiatrie', maxlength: 80 },
+        { name: 'kuerzel', label: 'Kürzel (optional)', placeholder: 'z. B. A3', maxlength: 10 },
+        { name: 'telefon', label: 'Telefon (optional)', type: 'tel', maxlength: 40 },
+        { name: 'copy_from', label: 'Mindestbesetzung übernehmen von', type: 'select', value: '',
+          options: [['', 'keiner – später festlegen'], ...units.filter((u) => u.active).map((u) => [u.id, u.name])],
+          hint: 'Personen je Dienst und Wochentag; lässt sich danach anpassen.' },
+      ],
+    });
+    if (!r) return;
+    const copyFrom = r.copy_from ? Number(r.copy_from) : null;
+    save(() => api('POST', 'api/units', { ...r, building_id: buildingId || null, copy_from: copyFrom }),
+      copyFrom ? 'Station angelegt, Mindestbesetzung übernommen.' : 'Station angelegt. Bitte noch die Mindestbesetzung festlegen.');
+  };
 
-  setMain(h('div', { class: 'card' }, h('h2', { style: { margin: 0 } }, `Stationen (${units.filter((u) => u.active).length} aktiv)`),
-    h('p', { class: 'small muted' }, 'Stationen bzw. Bereiche anlegen und umbenennen. Die Namen erscheinen im Dienstplan, in der Personalakte (Stammbereich) und in den Auswertungen. ',
-      'Nicht mehr benötigte Stationen bitte deaktivieren; löschen geht nur, solange noch keine Schichten angelegt sind.')),
-  newForm, units.map(unitCard));
+  // --- Gebäude ---
+  const buildingForm = async (b) => {
+    const r = await uiForm({
+      title: b ? 'Gebäude bearbeiten' : 'Neues Gebäude', okText: b ? 'Speichern' : 'Anlegen',
+      fields: [
+        { name: 'name', label: 'Name', required: true, value: b?.name || '', placeholder: 'z. B. Haus C – Tagesklinik', maxlength: 80 },
+        { name: 'kuerzel', label: 'Kürzel (optional)', value: b?.kuerzel || '', placeholder: 'z. B. C', maxlength: 10 },
+        { name: 'beschreibung', label: 'Beschreibung / Lage (optional)', type: 'textarea', rows: 2, value: b?.beschreibung || '', maxlength: 300,
+          placeholder: 'z. B. Eingang Marsbruchstraße, 2. OG' },
+        { name: 'sort', label: 'Reihenfolge', type: 'number', min: 0, step: 1, value: b?.sort ?? '', inputmode: 'numeric', hint: 'kleinere Zahl = weiter oben' },
+      ],
+    });
+    if (!r) return;
+    const body = { ...r, sort: r.sort === '' ? undefined : Number(r.sort) };
+    save(() => api(b ? 'PUT' : 'POST', b ? `api/buildings/${b.id}` : 'api/buildings', body), b ? 'Gebäude gespeichert.' : 'Gebäude angelegt.');
+  };
+
+  const buildingSection = (b, list) => h('section', { class: `card campus-building${b && !b.active ? ' inactive' : ''}` },
+    h('div', { class: 'campus-head' },
+      h('div', {}, h('h2', {}, b ? (b.kuerzel ? `${b.name} (${b.kuerzel})` : b.name) : 'Ohne Gebäude'),
+        h('div', { class: 'station-meta', style: { margin: '.2rem 0 0' } },
+          h('span', {}, `${list.filter((u) => u.active).length} Station(en)`),
+          b ? h('span', {}, `👥 ${b.personal} Person(en)`) : null,
+          b?.beschreibung ? h('span', {}, b.beschreibung) : null,
+          b && !b.active ? h('span', { class: 'badge bad' }, 'inaktiv') : null)),
+      h('div', { class: 'toolbar', style: { margin: 0 } },
+        h('button', { onclick: () => newStation(b?.id) }, '+ Station'),
+        b ? h('button', { class: 'ghost', onclick: () => buildingForm(b) }, 'Bearbeiten') : null,
+        b ? h('button', { class: 'ghost', onclick: () => save(() => api('PUT', `api/buildings/${b.id}`, { active: !b.active }), b.active ? 'Gebäude deaktiviert.' : 'Gebäude aktiviert.') },
+          b.active ? 'Deaktivieren' : 'Aktivieren') : null,
+        b ? h('button', { class: 'danger', onclick: async () => {
+          if (!await uiConfirm(`„${b.name}“ wird gelöscht. Die ${list.length} Station(en) bleiben erhalten und sind danach keinem Gebäude zugeordnet.`,
+            { title: 'Gebäude löschen?', okText: 'Löschen', danger: true })) return;
+          save(() => api('DELETE', `api/buildings/${b.id}`), 'Gebäude gelöscht.');
+        } }, 'Löschen') : null)),
+    list.length ? h('div', { class: 'campus-stations' }, list.map(stationCard))
+      : h('p', { class: 'muted' }, 'Noch keine Stationen in diesem Gebäude.'));
+
+  const ohne = units.filter((u) => !u.building_id);
+  setMain(
+    h('div', { class: 'card' },
+      h('div', { class: 'toolbar', style: { marginBottom: '.25rem' } },
+        h('h2', { style: { margin: 0 } }, 'Campus & Stationen'), h('span', { class: 'spacer' }),
+        h('button', { onclick: () => buildingForm(null) }, '+ Gebäude'),
+        h('button', { class: 'ghost', onclick: () => newStation(null) }, '+ Station')),
+      h('p', { class: 'small muted', style: { margin: 0 } },
+        `${buildings.filter((b) => b.active).length} Gebäude · ${units.filter((u) => u.active).length} aktive Stationen · `,
+        'Gebäude und Stationen erscheinen im Dienstplan (Auswahl „Gebäude – alle Stationen“), in der Personalakte und in den Auswertungen. ',
+        types.length ? '' : 'Tipp: Legen Sie unter „Dienstzeiten“ auch die Dienste an.')),
+    buildings.map((b) => buildingSection(b, units.filter((u) => u.building_id === b.id))),
+    ohne.length || !buildings.length ? buildingSection(null, ohne) : null);
 }
 
 // ---------- Personalverwaltung (Verwaltung) ----------
@@ -686,11 +959,12 @@ function vertragHinweis(u) {
 
 async function renderStaff() {
   const [users, units] = await Promise.all([api('GET', 'api/users'), api('GET', 'api/units')]);
-  const unitName = new Map(units.map((u) => [u.id, u.name]));
+  const unitById = new Map(units.map((u) => [u.id, u]));
+  const unitName = new Map(units.map((u) => [u.id, u.building_name ? `${u.name} · ${u.building_name}` : u.name]));
   state.personalFilter = state.personalFilter || { q: '', unit: '', qual: '', status: 'aktiv' };
   const f = state.personalFilter;
   const search = h('input', { type: 'search', placeholder: 'Name, Personalnr., Benutzer …', value: f.q });
-  const unitSel = h('select', {}, h('option', { value: '' }, 'alle Bereiche'), units.map((u) => h('option', { value: u.id, selected: String(u.id) === f.unit }, u.name)));
+  const unitSel = unitFilterSelect(units, f.unit, () => draw(), 'alle Bereiche');
   const qualSel = h('select', {}, h('option', { value: '' }, 'alle Qualifikationen'),
     (state.settings.qualifikationen || []).map((q) => h('option', { value: q, selected: q === f.qual }, q)));
   const statusSel = h('select', {}, [['aktiv', 'aktive'], ['inaktiv', 'inaktive / ausgeschiedene'], ['verwaltung', 'mit Verwaltungsrechten'], ['', 'alle']]
@@ -705,7 +979,11 @@ async function renderStaff() {
       if (f.status === 'aktiv' && ausgeschieden) return false;
       if (f.status === 'inaktiv' && !ausgeschieden) return false;
       if (f.status === 'verwaltung' && !(u.role === 'manager' || u.admin_rechte !== 'keine')) return false;
-      if (f.unit && String(u.stammbereich_id) !== f.unit) return false;
+      if (f.unit) {
+        const unit = unitById.get(u.stammbereich_id);
+        if (f.unit.startsWith('b:') ? String(unit?.building_id ?? 'none') !== f.unit.slice(2) || !unit && f.unit !== 'b:none'
+          : String(u.stammbereich_id) !== f.unit.replace(/^u:/, '')) return false;
+      }
       if (f.qual && u.qualification !== f.qual) return false;
       if (f.q && ![u.name, u.username, u.personalnummer, u.email].some((x) => String(x || '').toLowerCase().includes(f.q))) return false;
       return true;
@@ -723,7 +1001,7 @@ async function renderStaff() {
         u.totp_enabled ? null : h('span', { class: 'badge warn' }, '2FA offen'))))));
     stackTables(card);
   };
-  for (const el of [unitSel, qualSel, statusSel]) el.addEventListener('change', draw);
+  for (const el of [qualSel, statusSel]) el.addEventListener('change', draw);
   search.addEventListener('input', draw);
   const card = h('div', { class: 'card' },
     h('div', { class: 'toolbar' }, h('h2', { style: { margin: 0 } }, 'Personal'), h('span', { class: 'spacer' }),
@@ -742,7 +1020,7 @@ async function renderStaff() {
 }
 
 async function userAction(u, body, question) {
-  if (question && !confirm(question)) return false;
+  if (question && !await uiConfirm(question)) return false;
   try { await api('PUT', `api/users/${u.id}`, body); toast('Erledigt.'); return true; } catch (e) { toast(e.message, true); return false; }
 }
 
@@ -810,7 +1088,8 @@ async function renderPersonalakte(id) {
       } }, '2FA zurücksetzen') : null,
       u.locked ? h('button', { class: 'ghost', onclick: async () => { if (await userAction(u, { unlock: true })) renderPersonalakte(u.id); } }, 'Entsperren') : null,
       h('button', { class: 'ghost', onclick: async () => {
-        const pw = prompt(`Neues Startpasswort für ${u.name} (mind. 6 Zeichen):`);
+        const pw = await uiPrompt({ title: 'Passwort neu setzen', message: u.name, label: 'Neues Startpasswort', type: 'password',
+          required: true, minLength: 6, autocomplete: 'new-password', okText: 'Setzen' });
         if (!pw) return;
         if (await userAction(u, { password: pw })) renderPersonalakte(u.id);
       } }, 'Passwort neu setzen')));
@@ -921,7 +1200,8 @@ async function renderShiftTypes() {
       const body = Object.fromEntries(Object.entries(r).map(([k, el]) => [k, el.type === 'checkbox' ? el.checked : el.value]));
       body.break_min = Number(body.break_min);
       if (t && (body.start_time !== t.start_time || body.end_time !== t.end_time || body.break_min !== t.break_min)) {
-        body.apply_future = confirm('Geänderte Zeiten auch für bereits erzeugte, zukünftige Schichten übernehmen?');
+        body.apply_future = await uiConfirm('Sollen die geänderten Zeiten auch für bereits erzeugte, zukünftige Schichten gelten?',
+          { title: 'Zeiten übernehmen?', okText: 'Ja, übernehmen', cancelText: 'Nur für neue' });
       }
       try {
         const res = await api(t ? 'PUT' : 'POST', t ? `api/shift-types/${t.id}` : 'api/shift-types', body);
@@ -1008,7 +1288,19 @@ async function renderRequirements() {
           toast('Mindestbesetzung gespeichert.');
         } catch (e) { toast(e.message, true); }
       },
-    }, 'Speichern'))), cards, await qualRulesCard(units.filter((u) => u.active), activeTypes));
+    }, 'Speichern'))), cards,
+    h('div', { class: 'card save-bar' }, h('button', {
+      onclick: async () => {
+        try {
+          await api('PUT', 'api/requirements', inputs.map((i) => ({
+            unit_id: i.unit_id, shift_type_id: i.shift_type_id, weekday: i.weekday,
+            min_staff: Number(i.min.value || 0), max_staff: i.max.value === '' ? null : Number(i.max.value),
+          })));
+          toast('Mindestbesetzung gespeichert.');
+        } catch (e) { toast(e.message, true); }
+      },
+    }, 'Speichern')),
+    await qualRulesCard(units.filter((u) => u.active), activeTypes));
 }
 
 // ---------- Einstellungen (Manager) ----------
@@ -1083,7 +1375,7 @@ function logoCard() {
     h('div', { class: 'toolbar' }, input,
       h('button', { onclick: () => input.click() }, b.logo ? 'Anderes Logo hochladen' : 'Logo hochladen'),
       b.logo ? h('button', { class: 'danger', onclick: async () => {
-        if (!confirm('Logo entfernen?')) return;
+        if (!await uiConfirm('Das Logo wird entfernt.', { title: 'Logo entfernen?', okText: 'Entfernen', danger: true })) return;
         try { await api('DELETE', 'api/branding/logo'); await loadBranding(); renderSettings(); } catch (e) { toast(e.message, true); }
       } }, 'Entfernen') : null));
 }
@@ -1111,7 +1403,7 @@ function attachmentList(a, canDelete) {
     h('a', { href: `api/attachments/${f.id}?inline=1`, target: '_blank', rel: 'noopener' }, f.filename),
     h('span', { class: 'small muted' }, ` (${fmtSize(f.size)})`),
     canDelete ? h('button', { class: 'tiny danger', title: 'Datei löschen', onclick: async () => {
-      if (!confirm(`${f.filename} löschen?`)) return;
+      if (!await uiConfirm(f.filename, { title: 'Datei löschen?', okText: 'Löschen', danger: true })) return;
       try { await api('DELETE', `api/attachments/${f.id}`); toast('Gelöscht.'); refresh(); } catch (e) { toast(e.message, true); }
     } }, '×') : null)));
 }
@@ -1136,15 +1428,13 @@ function uploadButton(a) {
 }
 
 async function extendSickness(a) {
-  const to = prompt(`Krankmeldung ${range(a)} – neues Enddatum (TT.MM.JJJJ):`, fmtDate(a.to_date));
-  if (!to) return;
-  const m = to.trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
-  if (!m) return toast('Bitte Datum als TT.MM.JJJJ angeben.', true);
-  const iso = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  const iso = await uiPrompt({ title: 'Krankmeldung ändern', message: `Bisher: ${range(a)}`, label: 'krank bis einschließlich',
+    type: 'date', value: a.to_date, required: true, okText: 'Speichern' });
+  if (!iso) return;
   try {
     const r = await api('PUT', `api/absences/${a.id}`, { to: iso });
     toast(r.removed ? `Gespeichert. ${r.removed} Dienst(e) wurden ausgetragen.` : 'Gespeichert.');
-    if (r.au_fehlt) alert(`Ab dem ${state.settings.au_ab_tag}. Krankheitstag ist eine Arbeitsunfähigkeitsbescheinigung erforderlich. Bitte laden Sie sie hoch.`);
+    if (r.au_fehlt) await uiAlert(`Ab dem ${state.settings.au_ab_tag}. Krankheitstag ist eine Arbeitsunfähigkeitsbescheinigung erforderlich. Bitte laden Sie sie hoch.`);
   } catch (e) { toast(e.message, true); }
   refresh();
 }
@@ -1187,7 +1477,7 @@ function absenceForm(type, onSaved, users) {
       if (r.removed) msg += ` ${r.removed} Dienst(e) wurden ausgetragen.`;
       toast(msg);
       if (t === 'krank' && r.au_erforderlich && !users) {
-        alert(`Ihre Krankmeldung umfasst ${r.kalendertage} Tage. Ab dem ${state.settings.au_ab_tag}. Tag ist eine Arbeitsunfähigkeitsbescheinigung nötig – bitte laden Sie sie unten hoch.`);
+        await uiAlert(`Ihre Krankmeldung umfasst ${r.kalendertage} Tage. Ab dem ${state.settings.au_ab_tag}. Tag ist eine Arbeitsunfähigkeitsbescheinigung nötig – bitte laden Sie sie unten hoch.`);
       }
       onSaved();
     } catch (e) { toast(e.message, true); }
@@ -1231,7 +1521,7 @@ async function renderMyAbsences() {
             a.type === 'krank' ? uploadButton(a) : null,
             a.type === 'krank' ? h('button', { class: 'tiny ghost', onclick: () => extendSickness(a) }, 'Verlängern') : null,
             a.type !== 'krank' && a.status === 'beantragt' ? h('button', { class: 'tiny danger', onclick: async () => {
-              if (!confirm('Antrag zurückziehen?')) return;
+              if (!await uiConfirm('Der Antrag wird gelöscht.', { title: 'Antrag zurückziehen?', okText: 'Zurückziehen', danger: true })) return;
               try { await api('DELETE', `api/absences/${a.id}`); toast('Zurückgezogen.'); renderMyAbsences(); } catch (e) { toast(e.message, true); }
             } }, 'Zurückziehen') : null))))))
         : h('p', { class: 'muted' }, 'Keine Einträge.')),
@@ -1251,11 +1541,11 @@ async function renderAbsencesMgr() {
   const decide = async (a, status) => {
     let note = '';
     if (status === 'abgelehnt') {
-      note = askReason(`Antrag auf ${typeLabel(a)} von ${a.name} (${range(a)}) ablehnen.\n\nBegründung:`, true);
+      note = await askReason(`Antrag auf ${typeLabel(a)} von ${a.name} (${range(a)}) ablehnen.`, true, { title: 'Antrag ablehnen', okText: 'Ablehnen' });
       if (note === null) return;
     } else {
-      const extra = a.konflikte ? `\n\nAchtung: ${a.name} ist in ${a.konflikte} Dienst(en) eingetragen. Diese werden ausgetragen.` : '';
-      if (!confirm(`${typeLabel(a)} von ${a.name} (${range(a)}, ${a.arbeitstage} Arbeitstage) genehmigen?${extra}`)) return;
+      const extra = a.konflikte ? ` Achtung: ${a.name} ist in ${a.konflikte} Dienst(en) eingetragen. Diese werden ausgetragen.` : '';
+      if (!await uiConfirm(`${typeLabel(a)} von ${a.name}: ${range(a)}, ${a.arbeitstage} Arbeitstage.${extra}`, { title: 'Genehmigen?', okText: 'Genehmigen' })) return;
     }
     try {
       const r = await api('PUT', `api/absences/${a.id}/decision`, { status, note });
@@ -1291,7 +1581,7 @@ async function renderAbsencesMgr() {
           h('td', {}, attachmentList(a, true) || '–'),
           h('td', { class: 'actions' }, uploadButton(a), h('button', { class: 'tiny ghost', onclick: () => extendSickness(a) }, 'Ende ändern'),
             h('button', { class: 'tiny danger', onclick: async () => {
-              if (!confirm(`Krankmeldung von ${a.name} (${range(a)}) löschen? Hochgeladene Bescheinigungen werden ebenfalls gelöscht.`)) return;
+              if (!await uiConfirm(`Krankmeldung von ${a.name} (${range(a)}). Hochgeladene Bescheinigungen werden ebenfalls gelöscht.`, { title: 'Krankmeldung löschen?', okText: 'Löschen', danger: true })) return;
               try { await api('DELETE', `api/absences/${a.id}`); toast('Gelöscht.'); refresh(); } catch (e) { toast(e.message, true); }
             } }, 'Löschen')))))))
         : h('p', { class: 'muted' }, 'Keine.'),
@@ -1302,7 +1592,7 @@ async function renderAbsencesMgr() {
           h('td', {}, a.name), h('td', {}, typeLabel(a)), h('td', {}, range(a)), h('td', { class: 'num' }, a.arbeitstage), h('td', {}, statusBadge(a)),
           h('td', {}, a.note, a.decision_note ? h('div', { class: 'small muted' }, a.decision_note) : null),
           h('td', {}, h('button', { class: 'tiny danger', onclick: async () => {
-            if (!confirm(`${typeLabel(a)} von ${a.name} (${range(a)}) löschen?`)) return;
+            if (!await uiConfirm(`${typeLabel(a)} von ${a.name} (${range(a)})`, { title: 'Eintrag löschen?', okText: 'Löschen', danger: true })) return;
             try { await api('DELETE', `api/absences/${a.id}`); toast('Gelöscht.'); refresh(); } catch (e) { toast(e.message, true); }
           } }, 'Löschen')))))))
         : h('p', { class: 'muted' }, 'Keiner.')),
@@ -1339,7 +1629,7 @@ async function renderLog() {
 
 // ---------- Zwei-Faktor-Anmeldung ----------
 function authShell(...children) {
-  document.getElementById('topbar').hidden = true;
+  hideAppChrome();
   setMain(h('section', { class: 'login card' }, children));
 }
 
@@ -1360,7 +1650,7 @@ function renderCodeStep() {
     try {
       const r = await api('POST', 'api/login/2fa', { code: input.value });
       if (r.used_recovery) {
-        alert(`Sie haben sich mit einem Wiederherstellungscode angemeldet. Noch ${r.user.recovery_left} Codes übrig.\n\n`
+        await uiAlert(`Sie haben sich mit einem Wiederherstellungscode angemeldet. Noch ${r.user.recovery_left} Codes übrig.\n\n`
           + 'Bitte richten Sie unter „Sicherheit“ neue Codes ein oder lassen Sie die 2FA von der Einsatzplanung zurücksetzen.');
       }
       await boot();
@@ -1460,7 +1750,8 @@ async function refreshMe() {
 function renderWho() {
   const rolle = state.me.is_haupt ? 'Hauptverwaltung' : state.me.admin_rechte === 'vertretung' && isMgr() ? `Vertretung bis ${fmtDate(state.me.admin_bis)}`
     : isMgr() ? 'Verwaltung' : 'Mitarbeiter/in';
-  document.getElementById('who').replaceChildren(h('span', { class: 'person' }, avatar(state.me, 26), `${state.me.name} (${rolle})`));
+  document.getElementById('who').replaceChildren(h('span', { class: 'person', title: `${state.me.name} (${rolle})` }, avatar(state.me, 28),
+    h('span', { class: 'who-name' }, `${state.me.name} (${rolle})`)));
 }
 
 async function renderAccount() {
@@ -1475,24 +1766,22 @@ async function renderAccount() {
     try { await api('POST', 'api/me/password', Object.fromEntries(new FormData(form))); toast('Passwort geändert.'); form.reset(); } catch (e) { toast(e.message, true); }
   });
 
-  const askCode = (question) => {
-    const c = prompt(`${question}\n\nBitte den aktuellen Code aus der Authenticator-App eingeben:`);
-    return c ? c.trim() : null;
-  };
+  const askCode = (question) => uiPrompt({ title: question, label: 'Aktueller Code aus der Authenticator-App', inputmode: 'numeric',
+    placeholder: '123456', required: true, autocomplete: 'one-time-code', okText: 'Bestätigen' });
   const twofa = h('div', { class: 'card', style: { maxWidth: '480px' } }, h('h2', {}, 'Zwei-Faktor-Anmeldung'),
     user.totp_enabled
       ? [h('p', {}, h('span', { class: 'badge ok' }, 'eingerichtet'), ` · ${user.recovery_left} Wiederherstellungscodes übrig`),
         h('div', { class: 'toolbar' },
           h('button', { class: 'ghost', onclick: async () => {
-            const code = askCode('Neue Wiederherstellungscodes erzeugen? Die alten werden ungültig.');
+            const code = await askCode('Neue Wiederherstellungscodes erzeugen? Die alten werden ungültig.');
             if (!code) return;
             try { const r = await api('POST', 'api/2fa/recovery-codes', { code }); showRecoveryCodes(r.recovery_codes, () => go('account')); } catch (e) { toast(e.message, true); }
           } }, 'Neue Wiederherstellungscodes'),
-          h('button', { class: 'ghost', onclick: () => {
-            if (confirm('Neues Handy einrichten? Danach gilt nur noch der neue Schlüssel.')) renderSetup(true, true);
+          h('button', { class: 'ghost', onclick: async () => {
+            if (await uiConfirm('Danach gilt nur noch der neue Schlüssel; die App auf dem alten Handy funktioniert nicht mehr.', { title: 'Neues Handy einrichten?', okText: 'Weiter' })) renderSetup(true, true);
           } }, 'Neues Handy einrichten'),
           !settings.zwei_faktor_pflicht ? h('button', { class: 'danger', onclick: async () => {
-            const code = askCode('Zwei-Faktor-Anmeldung deaktivieren?');
+            const code = await askCode('Zwei-Faktor-Anmeldung deaktivieren?');
             if (!code) return;
             try { await api('POST', 'api/2fa/disable', { code }); toast('Deaktiviert.'); renderAccount(); } catch (e) { toast(e.message, true); }
           } }, 'Deaktivieren') : null)]
