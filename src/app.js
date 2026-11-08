@@ -956,6 +956,14 @@ function createApp(db, opts = {}) {
     // /LWL → /LWL/ (damit relative Pfade stimmen); Startseite der Domain → Dienstplan
     root.use((req, res, next) => {
       if (req.path === base || req.path === '/') return res.redirect(302, `${base}/`);
+      // andere Schreibweise (z. B. /LWL statt /lwl) auf die eingerichtete umleiten,
+      // sonst passt das Anmelde-Cookie nicht
+      const lower = req.path.toLowerCase();
+      const b = base.toLowerCase();
+      if ((lower === b || lower.startsWith(`${b}/`)) && !req.path.startsWith(base)) {
+        const rest = req.originalUrl.slice(base.length);
+        return res.redirect(301, `${base}${rest === '' ? '/' : rest}`);
+      }
       next();
     });
     root.use(base, app);

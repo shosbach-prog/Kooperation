@@ -18,6 +18,11 @@ test('Betrieb im Unterordner (BASE_PATH=/LWL)', async () => {
     assert.equal(r.headers.get('location'), '/LWL/');
     r = await fetch(`${base}/LWL`, { redirect: 'manual' });
     assert.equal(r.headers.get('location'), '/LWL/');
+    // andere Schreibweise wird auf die eingerichtete umgeleitet
+    r = await fetch(`${base}/lwl`, { redirect: 'manual' });
+    assert.equal(r.headers.get('location'), '/LWL/');
+    r = await fetch(`${base}/lwl/app.js?v=1`, { redirect: 'manual' });
+    assert.equal(r.headers.get('location'), '/LWL/app.js?v=1');
     r = await fetch(`${base}/LWL/`);
     assert.equal(r.status, 200);
     assert.match(await r.text(), /<title>/);
