@@ -79,7 +79,7 @@ async function renderRequirements() {
   const activeTypes = types.filter((t) => t.active);
   const get = (u, t, wd) => reqs.find((r) => r.unit_id === u && r.shift_type_id === t && r.weekday === wd);
   const inputs = [];
-  const cards = units.filter((u) => u.active).map((u) => h('div', { class: 'card' }, h('h3', {}, u.name),
+  const cards = units.filter((u) => u.active && canManageUnit(u.id)).map((u) => h('div', { class: 'card' }, h('h3', {}, u.name),
     h('div', { class: 'table-wrap' }, h('table', {},
       h('thead', {}, h('tr', {}, h('th', {}, 'Dienst'), WD_ORDER.map((wd) => h('th', {}, WD[wd])))),
       h('tbody', {}, activeTypes.map((t) => h('tr', {},
@@ -117,7 +117,7 @@ async function renderRequirements() {
         } catch (e) { toast(e.message, true); }
       },
     }, 'Speichern')),
-    await qualRulesCard(units.filter((u) => u.active), activeTypes));
+    isFullMgr() ? await qualRulesCard(units.filter((u) => u.active), activeTypes) : null);
 }
 
 // ---------- Einstellungen (Manager) ----------

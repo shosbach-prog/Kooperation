@@ -77,7 +77,7 @@ module.exports = (app, ctx) => {
   app.delete('/api/swaps/:id', auth, wrap((req) => {
     const o = loadOffer(Number(req.params.id));
     if (!o) throw new HttpError(404, 'Angebot nicht gefunden.');
-    if (o.user_id !== req.user.id && !hasMgr(req.user)) throw new HttpError(403, 'Nicht erlaubt.');
+    if (o.user_id !== req.user.id && !(hasMgr(req.user) && ctx.inScope(req.user, o.unit_id))) throw new HttpError(403, 'Nicht erlaubt.');
     if (!['offen', 'angenommen'].includes(o.status)) throw new HttpError(400, 'Das Angebot ist bereits abgeschlossen.');
     db.prepare("UPDATE swap_offers SET status = 'zurueckgezogen' WHERE id = ?").run(o.id);
     audit(req.user.id, 'swap.withdraw', { id: o.id, shift_id: o.shift_id, user_id: o.user_id });
@@ -106,6 +106,7 @@ module.exports = (app, ctx) => {
   app.post('/api/swaps/:id/decide', auth, manager, wrap((req) => {
     const o = loadOffer(Number(req.params.id));
     if (!o || o.status !== 'angenommen') throw new HttpError(404, 'Kein Tausch zur Bestätigung.');
+    ctx.requireUnit(req, o.unit_id);
     const ok = req.body?.status === 'bestaetigt';
     const note = String(req.body?.note || '').trim().slice(0, 300);
     if (ok) {

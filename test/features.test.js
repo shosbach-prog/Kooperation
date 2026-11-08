@@ -225,3 +225,57 @@ test('Benachrichtigungen: Ereignisse, Push-Abo, Rundruf, AU-Erinnerung', async (
   const kevin = await as('kschulz');
   assert.ok((await unread(kevin)).items.some((x) => x.art === 'au'));
 });
+
+test('Verwaltungsrechte nur für bestimmte Stationen', async () => {
+  const units = (await mgr('GET', '/api/units')).data;
+  const s1 = units.find((u) => u.name === 'Station 1').id, s2 = units.find((u) => u.name === 'Station 2').id;
+  // Stammbereiche setzen: Kevin → Station 1, Tobias → Station 2
+  await mgr('PUT', `/api/users/${users.kschulz}`, { stammbereich_id: s1 });
+  await mgr('PUT', `/api/users/${users.twagner}`, { stammbereich_id: s2 });
+  // Murat wird Verwalter nur für Station 1
+  let r = await mgr('PUT', `/api/users/${users.myilmaz}`, { admin_rechte: 'voll', admin_units: [s1] });
+  assert.deepEqual(r.data.admin_units, [s1]);
+  assert.equal(r.data.is_manager, true);
+  const murat = await as('myilmaz');
+  const me = (await murat('GET', '/api/me')).data.user;
+  assert.deepEqual(me.admin_units, [s1]);
+
+  // Dienstplan: auf Station 1 eintragen erlaubt, auf Station 2 nicht (für andere Personen)
+  const f1 = await shiftOn(day(25), 'F', 'Station 1');
+  const f2 = await shiftOn(day(25), 'F', 'Station 2');
+  assert.equal((await murat('POST', `/api/shifts/${f1.id}/assign`, { user_id: users.kschulz })).status, 200);
+  r = await murat('POST', `/api/shifts/${f2.id}/assign`, { user_id: users.twagner });
+  assert.equal(r.data.code, 'BEREICH');
+  const plan2 = (await mgr('GET', `/api/plan?from=${day(25)}&to=${day(25)}`)).data.shifts.find((s) => s.id === f2.id);
+  assert.equal(plan2.assigned.length, 0);
+  assert.equal((await murat('DELETE', `/api/shifts/${f1.id}/assign?user_id=${users.kschulz}`, { reason: 'Test' })).status, 200);
+  assert.equal((await murat('PUT', `/api/shifts/${f2.id}`, { min_staff: 1 })).data.code, 'BEREICH');
+  assert.equal((await murat('PUT', `/api/shifts/${f1.id}`, { min_staff: 1 })).status, 200);
+  assert.equal((await murat('POST', '/api/shifts/generate', { from: day(26), to: day(26), unit_ids: [s2] })).data.code, 'BEREICH');
+  assert.equal((await murat('POST', '/api/shifts/generate', { from: day(26), to: day(26) })).status, 200); // nur eigene Stationen
+  // Mindestbesetzung nur für eigene Station
+  assert.equal((await murat('PUT', '/api/requirements', [{ unit_id: s2, shift_type_id: 1, weekday: 1, min_staff: 1, max_staff: 2 }])).data.code, 'BEREICH');
+  // Personal: Kevin (Station 1) bearbeitbar, Tobias (Station 2) nicht
+  assert.equal((await murat('PUT', `/api/users/${users.kschulz}`, { telefon: '1234' })).status, 200);
+  assert.equal((await murat('PUT', `/api/users/${users.twagner}`, { telefon: '1234' })).data.code, 'BEREICH');
+  assert.equal((await murat('PUT', `/api/users/${users.kschulz}`, { stammbereich_id: s2 })).data.code, 'BEREICH');
+  // neue Person nur mit Stammbereich im eigenen Bereich
+  assert.equal((await murat('POST', '/api/users', { name: 'Neu', username: 'neu1', password: 'geheim1' })).data.code, 'BEREICH');
+  assert.equal((await murat('POST', '/api/users', { name: 'Neu', username: 'neu1', password: 'geheim1', stammbereich_id: s1 })).status, 200);
+  // Abwesenheiten: für Tobias (Station 2) nichts eintragen
+  assert.equal((await murat('POST', '/api/absences', { user_id: users.twagner, type: 'krank', from: day(27), to: day(27) })).data.code, 'BEREICH');
+  assert.equal((await murat('POST', '/api/absences', { user_id: users.kschulz, type: 'krank', from: day(27), to: day(27) })).status, 200);
+  // Campusweite Einstellungen gesperrt; Lesen erlaubt
+  assert.equal((await murat('PUT', '/api/settings', { klinik_name: 'X' })).data.code, 'BEREICH');
+  assert.equal((await murat('POST', '/api/units', { name: 'Neue Station' })).status, 403);
+  assert.equal((await murat('POST', '/api/shift-types', { name: 'X', code: 'X', start_time: '08:00', end_time: '16:00', break_min: 30 })).status, 403);
+  assert.equal((await murat('GET', '/api/users')).status, 200);
+  assert.equal((await murat('GET', `/api/report?month=${day(25).slice(0, 7)}`)).status, 200);
+  // Rechte vergeben bleibt der Hauptverwaltung vorbehalten
+  assert.equal((await murat('PUT', `/api/users/${users.kschulz}`, { admin_units: [s1] })).status, 403);
+  // ganzer Campus: Bereich leeren
+  r = await mgr('PUT', `/api/users/${users.myilmaz}`, { admin_units: [] });
+  assert.deepEqual(r.data.admin_units, []);
+  assert.equal((await murat('PUT', `/api/shifts/${f2.id}`, { min_staff: 1 })).status, 200);
+  await mgr('PUT', `/api/users/${users.myilmaz}`, { admin_rechte: 'keine' });
+});

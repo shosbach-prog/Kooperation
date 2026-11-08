@@ -163,12 +163,12 @@ async function renderPersonalakte(id) {
 
   setMain(h('div', { class: 'toolbar' }, back), head,
     h('div', { class: 'grid-2' }, kontoCard, zeitCard),
-    form, state.me.is_haupt && u.id !== state.me.id ? rechteCard(u) : null,
+    form, state.me.is_haupt && u.id !== state.me.id ? rechteCard(u, units) : null,
     h('div', { class: 'grid-2' }, dienstCard, absCard), actions);
 }
 
 /** Verwaltungsrechte vergeben (nur Hauptverwaltung) */
-function rechteCard(u) {
+function rechteCard(u, units) {
   const sel = h('select', {},
     h('option', { value: 'keine', selected: u.role !== 'manager' && u.admin_rechte === 'keine' }, 'keine – normale/r Mitarbeiter/in'),
     h('option', { value: 'vertretung', selected: u.admin_rechte === 'vertretung' }, 'Vertretung (befristet)'),
@@ -176,7 +176,17 @@ function rechteCard(u) {
     h('option', { value: 'haupt', selected: u.role === 'manager' }, 'Hauptverwaltung'));
   const bis = h('input', { type: 'date', value: u.admin_bis || addDays(todayIso(), 14), min: todayIso() });
   const bisLabel = h('label', {}, 'Vertretung gilt bis einschließlich', bis);
-  const sync = () => { bisLabel.hidden = sel.value !== 'vertretung'; };
+  // Verwaltungsbereich: ganzer Campus oder ausgewählte Stationen
+  const scope = new Set(u.admin_units || []);
+  const boxes = units.filter((x) => x.active || scope.has(x.id)).map((x) => {
+    const cb = h('input', { type: 'checkbox', value: x.id, checked: scope.has(x.id) });
+    return h('label', { class: 'check' }, cb, `${x.name}${x.building_name ? ` · ${x.building_name}` : ''}${x.verbund_name ? ` · ⇄ ${x.verbund_name}` : ''}`);
+  });
+  const bereich = h('fieldset', {}, h('legend', {}, 'Verwaltungsbereich'),
+    h('p', { class: 'small muted', style: { marginTop: 0 } }, 'Nichts angekreuzt = ganzer Campus. Mit Auswahl darf die Person nur in diesen Stationen ändern ',
+      '(Dienstplan, Personal mit diesem Stammbereich, deren Urlaub und Krankmeldungen); lesen darf sie alles. Campus, Dienstzeiten und Einstellungen bleiben dann gesperrt.'),
+    h('div', { class: 'check-list' }, boxes));
+  const sync = () => { bisLabel.hidden = sel.value !== 'vertretung'; bereich.hidden = !['voll', 'vertretung'].includes(sel.value); };
   sel.addEventListener('change', sync);
   sync();
   return h('div', { class: 'card' }, h('h3', { style: { marginTop: 0 } }, 'Verwaltungsrechte'),
@@ -184,11 +194,13 @@ function rechteCard(u) {
       'Verwalter/innen und Vertretungen können Dienstpläne, Personal, Urlaub und Krankmeldungen bearbeiten und arbeiten weiterhin selbst im Dienstplan mit. ',
       'Rechte vergeben, andere Verwalter/innen bearbeiten und Hauptverwaltung zuweisen kann nur die Hauptverwaltung. ',
       'Eine Vertretung endet automatisch nach dem angegebenen Tag. Alle Änderungen stehen im Protokoll.'),
-    h('div', { class: 'row' }, h('label', {}, 'Rechte', sel), bisLabel,
+    h('div', { class: 'row' }, h('label', {}, 'Rechte', sel), bisLabel), bereich,
+    h('div', { class: 'toolbar' },
       h('button', { onclick: async () => {
         const v = sel.value;
-        const body = v === 'haupt' ? { role: 'manager', admin_rechte: 'keine' }
-          : { role: 'staff', admin_rechte: v, ...(v === 'vertretung' ? { admin_bis: bis.value } : {}) };
+        const admin_units = boxes.map((l) => l.querySelector('input')).filter((c) => c.checked).map((c) => Number(c.value));
+        const body = v === 'haupt' ? { role: 'manager', admin_rechte: 'keine', admin_units: [] }
+          : { role: 'staff', admin_rechte: v, admin_units: v === 'keine' ? [] : admin_units, ...(v === 'vertretung' ? { admin_bis: bis.value } : {}) };
         const text = v === 'haupt' ? `${u.name} zur Hauptverwaltung machen? Hauptverwalter/innen werden nicht mehr im Dienstplan eingeplant.`
           : v === 'vertretung' ? `${u.name} als Vertretung bis ${fmtDate(bis.value)} einsetzen?`
             : v === 'voll' ? `${u.name} dauerhaft Verwaltungsrechte geben?` : `Verwaltungsrechte von ${u.name} entfernen?`;
@@ -213,7 +225,8 @@ function staffForm(u, units) {
         [...new Set([...(state.settings.qualifikationen || []), ...(u?.qualification ? [u.qualification] : [])])]
           .map((q) => h('option', { value: q, selected: u?.qualification === q }, q)))),
       h('label', {}, 'Stammbereich', h('select', { name: 'stammbereich_id' }, h('option', { value: '' }, '– keiner –'),
-        units.filter((x) => x.active || x.id === u?.stammbereich_id).map((x) => h('option', { value: x.id, selected: u?.stammbereich_id === x.id }, x.name)))),
+        units.filter((x) => (x.active || x.id === u?.stammbereich_id) && (canManageUnit(x.id) || x.id === u?.stammbereich_id))
+          .map((x) => h('option', { value: x.id, selected: u?.stammbereich_id === x.id }, x.name)))),
       f('weekly_hours', 'Wochenstunden', { type: 'number', step: '0.25', min: 0, value: u?.weekly_hours ?? state.settings.wochenstunden_standard }),
       f('min_hours_month', 'Mindestverfügbarkeit (Std./Monat)', { type: 'number', step: '0.5', min: 0, value: u?.min_hours_month ?? 0 })),
     section('Vertrag (TVöD)',

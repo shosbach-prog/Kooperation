@@ -62,6 +62,10 @@ const todayIso = () => { const d = new Date(); return toIso(Date.UTC(d.getFullYe
 const mondayOf = (iso) => addDays(iso, -((weekday(iso) + 6) % 7));
 const isMgr = () => !!(state.me && state.me.is_manager);
 const isStaffRole = () => !!(state.me && state.me.role === 'staff');
+/** Verwaltung ohne Beschränkung auf einzelne Stationen */
+const isFullMgr = () => isMgr() && !(state.me.admin_units || []).length;
+/** darf die Verwaltung diese Station bearbeiten? */
+const canManageUnit = (unitId) => isMgr() && (isFullMgr() || (state.me.admin_units || []).includes(Number(unitId)));
 const main = () => document.getElementById('main');
 
 function setMain(...nodes) {

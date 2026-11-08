@@ -176,7 +176,7 @@ function renderCell(s, staffUsers, compact = false) {
   const absentIds = new Map(absentOn(s.date).map((a) => [a.user_id, a]));
   const mine = s.assigned.some((a) => a.user_id === state.me.id);
 
-  const canAct = (a) => isMgr() || a.user_id === state.me.id;
+  const canAct = (a) => canManageUnit(s.unit_id) || a.user_id === state.me.id;
   const angebot = (a) => (s.angebote || []).find((o) => o.user_id === a.user_id);
   const swapMark = (a) => (angebot(a) ? h('span', { class: 'swap-mark', title: angebot(a).status === 'angenommen' ? 'Tausch wartet auf Bestätigung' : 'in der Tauschbörse angeboten' }, '⇆') : null);
   const list = h('ul', {}, s.assigned.map((a) => compact
@@ -189,18 +189,18 @@ function renderCell(s, staffUsers, compact = false) {
     h('span', { class: 'li-actions' },
       a.user_id === state.me.id && isStaffRole() && !angebot(a)
         ? h('button', { class: 'tiny ghost', title: 'In der Tauschbörse anbieten', 'aria-label': 'Dienst in der Tauschbörse anbieten', onclick: async () => { if (await offerShift(s)) refresh(); } }, '⇆') : null,
-      partner.length && (isMgr() || a.user_id === state.me.id)
+      partner.length && (canManageUnit(s.unit_id) || a.user_id === state.me.id)
         ? h('button', { class: 'tiny ghost', title: 'Auf verbundene Station umsetzen', 'aria-label': `${a.name} umsetzen`, onclick: () => moveShift(s, a) }, '⇄') : null,
-      isMgr() ? h('button', { class: 'tiny danger', title: 'Austragen', 'aria-label': `${a.name} austragen`, onclick: () => unassign(s, a.user_id, a.name) }, '×') : null))));
+      canManageUnit(s.unit_id) ? h('button', { class: 'tiny danger', title: 'Austragen', 'aria-label': `${a.name} austragen`, onclick: () => unassign(s, a.user_id, a.name) }, '×') : null))));
 
   const count = h('div', { class: 'count' },
     h('span', {}, `${n}/${s.max_staff ?? '∞'} · min ${s.min_staff}`),
-    isMgr() ? h('span', { class: 'li-actions' },
+    canManageUnit(s.unit_id) ? h('span', { class: 'li-actions' },
       s.unterbesetzt ? h('button', { class: 'tiny ghost', title: 'Rundruf: Personal benachrichtigen', 'aria-label': 'Rundruf senden', onclick: () => rundruf(s) }, '📣') : null,
       h('button', { class: 'tiny ghost', title: 'Besetzung/Notiz ändern', 'aria-label': 'Besetzung oder Notiz ändern', onclick: () => editShift(s) }, '✎')) : null);
 
   let action = null;
-  if (isMgr()) {
+  if (canManageUnit(s.unit_id)) {
     const free = staffUsers.filter((u) => !s.assigned.some((a) => a.user_id === u.id));
     if (free.length) {
       action = h('select', { onchange: (e) => { if (e.target.value) assign(s, Number(e.target.value)); } },
@@ -237,6 +237,59 @@ function renderCell(s, staffUsers, compact = false) {
   return h('div', { class: `cell ${cls}` }, count, list, missing, verbundInfo, s.note ? h('div', { class: 'note' }, s.note) : null, action);
 }
 
+// ---------- Dienstplan-Aktionen: eintragen, austragen, Schicht bearbeiten ----------
+async function assign(s, userId, force = false) {
+  let body = userId ? { user_id: userId, force } : {};
+  if (!userId) {
+    const required = !!state.settings.begruendung_eintragen;
+    if (required) {
+      const reason = await askReason(`Begründung für das Eintragen in ${s.type_name} am ${fmtDate(s.date)}:`, true);
+      if (reason === null) return;
+      body = { reason };
+    }
+  }
+  try {
+    await api('POST', `api/shifts/${s.id}/assign`, body);
+    toast('Eingetragen.');
+  } catch (e) {
+    if (canManageUnit(s.unit_id) && !force && (e.code === 'RUHEZEIT' || e.code === 'VOLL')
+      && await uiConfirm(`${e.message} Trotzdem eintragen (Ausnahme durch die Einsatzplanung)?`, { title: 'Ausnahme', okText: 'Trotzdem eintragen' })) {
+      return assign(s, userId, true);
+    }
+    toast(e.message, true);
+  }
+  refresh();
+}
+
+async function unassign(s, userId, name) {
+  const who = name ? `${name} aus` : 'Sich aus';
+  const required = !canManageUnit(s.unit_id) && !!state.settings.begruendung_austragen;
+  const reason = await askReason(`${who} ${s.type_name} am ${fmtDate(s.date)} (${s.unit_name}) austragen?`, required, { title: 'Austragen', okText: 'Austragen' });
+  if (reason === null) return;
+  try {
+    await api('DELETE', `api/shifts/${s.id}/assign${canManageUnit(s.unit_id) ? `?user_id=${userId}` : ''}`, { reason });
+    toast('Ausgetragen.');
+  } catch (e) { toast(e.message, true); }
+  refresh();
+}
+
+async function editShift(s) {
+  const r = await uiForm({
+    title: `${s.type_name} · ${WD[weekday(s.date)]} ${fmtDate(s.date)}`, message: s.unit_name,
+    fields: [
+      { name: 'min', label: 'Mindestbesetzung', type: 'number', min: 0, step: 1, inputmode: 'numeric', value: s.min_staff, required: true },
+      { name: 'max', label: 'Höchstbesetzung', type: 'number', min: 0, step: 1, inputmode: 'numeric', value: s.max_staff ?? '', hint: 'leer = unbegrenzt' },
+      { name: 'note', label: 'Notiz (optional)', type: 'textarea', rows: 2, value: s.note || '', maxlength: 500 },
+    ],
+  });
+  if (!r) return;
+  try {
+    await api('PUT', `api/shifts/${s.id}`, { min_staff: Number(r.min), max_staff: r.max === '' ? null : Number(r.max), note: r.note });
+    toast('Gespeichert.');
+  } catch (e) { toast(e.message, true); }
+  refresh();
+}
+
 /** Aktionen zu einer eingetragenen Person (Wochenraster) */
 function personActions(s, a) {
   const partner = s.verbund ? s.verbund.partner : [];
@@ -244,14 +297,14 @@ function personActions(s, a) {
   return openDialog((close) => dialogShell(a.name,
     `${s.type_name} · ${WD[weekday(s.date)]} ${fmtDate(s.date)} · ${s.unit_name}${a.qualification ? `\n${a.qualification}` : ''}`, null, [
       h('button', { type: 'button', class: 'ghost', onclick: () => close(null) }, 'Schließen'),
-      isMgr() || self ? h('button', { type: 'button', class: 'danger', onclick: () => close('out') }, 'Austragen') : null,
+      canManageUnit(s.unit_id) || self ? h('button', { type: 'button', class: 'danger', onclick: () => close('out') }, 'Austragen') : null,
       self && isStaffRole() && !(s.angebote || []).some((o) => o.user_id === a.user_id)
         ? h('button', { type: 'button', class: 'ghost', onclick: () => close('offer') }, '⇆ Anbieten') : null,
-      partner.length && (isMgr() || self) ? h('button', { type: 'button', onclick: () => close('move') }, self && !isMgr() ? '⇄ Station wechseln' : '⇄ Umsetzen') : null,
+      partner.length && (canManageUnit(s.unit_id) || self) ? h('button', { type: 'button', onclick: () => close('move') }, self && !canManageUnit(s.unit_id) ? '⇄ Station wechseln' : '⇄ Umsetzen') : null,
     ])).then((r) => {
     if (r === 'move') return moveShift(s, a);
     if (r === 'offer') return offerShift(s).then((ok) => ok && refresh());
-    if (r === 'out') return unassign(s, a.user_id, isMgr() && !self ? a.name : undefined);
+    if (r === 'out') return unassign(s, a.user_id, canManageUnit(s.unit_id) && !self ? a.name : undefined);
     return null;
   });
 }
@@ -259,7 +312,7 @@ function personActions(s, a) {
 /** Person innerhalb des Verbunds auf eine verbundene Station umsetzen (gleitendes Aufstocken) */
 async function moveShift(s, a, force = false) {
   const partner = s.verbund.partner;
-  const self = a.user_id === state.me.id && !isMgr();
+  const self = a.user_id === state.me.id && !canManageUnit(s.unit_id);
   const r = await uiForm({
     title: self ? 'Station wechseln' : `${a.name} umsetzen`,
     message: `${s.type_name} am ${WD[weekday(s.date)]} ${fmtDate(s.date)} · von ${s.unit_name}`,
@@ -272,10 +325,10 @@ async function moveShift(s, a, force = false) {
   });
   if (!r) return;
   try {
-    await api('POST', `api/shifts/${s.id}/move`, { to_shift_id: Number(r.to), user_id: isMgr() ? a.user_id : undefined, reason: r.reason, force });
+    await api('POST', `api/shifts/${s.id}/move`, { to_shift_id: Number(r.to), user_id: canManageUnit(s.unit_id) ? a.user_id : undefined, reason: r.reason, force });
     toast('Umgesetzt.');
   } catch (e) {
-    if (isMgr() && !force && e.code === 'VOLL' && await uiConfirm(`${e.message} Trotzdem umsetzen?`, { title: 'Ausnahme', okText: 'Trotzdem umsetzen' })) {
+    if (canManageUnit(s.unit_id) && !force && e.code === 'VOLL' && await uiConfirm(`${e.message} Trotzdem umsetzen?`, { title: 'Ausnahme', okText: 'Trotzdem umsetzen' })) {
       return moveShift(s, a, true);
     }
     toast(e.message, true);

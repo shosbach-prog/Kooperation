@@ -306,6 +306,7 @@ function migrate(db) {
   add('users', 'foto_version INTEGER NOT NULL DEFAULT 0');
   add('users', "ical_token TEXT NOT NULL DEFAULT ''");
   add('users', 'notify_email INTEGER NOT NULL DEFAULT 1');
+  add('users', "admin_units TEXT NOT NULL DEFAULT ''");
   add('units', "kuerzel TEXT NOT NULL DEFAULT ''");
   add('units', "telefon TEXT NOT NULL DEFAULT ''");
   add('units', 'leitung_id INTEGER');

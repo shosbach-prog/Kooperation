@@ -101,6 +101,7 @@ module.exports = (app, ctx) => {
   app.post('/api/shifts/:id/rundruf', auth, manager, wrap((req) => {
     const s = loadShifts('s.id = ?', [Number(req.params.id)])[0];
     if (!s) throw new HttpError(404, 'Schicht nicht gefunden.');
+    ctx.requireUnit(req, s.unit_id);
     const settings = getSettings();
     const qual = String(req.body?.qualification || '');
     const kandidaten = db.prepare("SELECT * FROM users WHERE active = 1 AND role = 'staff' AND (austritt = '' OR austritt >= ?)").all(s.date)
@@ -135,5 +136,5 @@ module.exports = (app, ctx) => {
     return n;
   };
   if (ctx.timers) setInterval(() => { try { ctx.remindAU(); } catch (e) { console.error(e); } }, 3600e3).unref();
-  app.post('/api/admin/run-reminders', auth, manager, wrap(() => ({ au: ctx.remindAU() })));
+  app.post('/api/admin/run-reminders', auth, ctx.managerFull, wrap(() => ({ au: ctx.remindAU() })));
 };

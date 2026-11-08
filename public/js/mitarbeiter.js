@@ -87,7 +87,7 @@ async function renderReport() {
 
 // ---------- Plan erzeugen (Manager) ----------
 async function renderGenerate() {
-  const units = (await api('GET', 'api/units')).filter((u) => u.active);
+  const units = (await api('GET', 'api/units')).filter((u) => u.active && canManageUnit(u.id));
   const start = addDays(mondayOf(todayIso()), 7);
   const fromI = h('input', { type: 'date', value: start });
   const toI = h('input', { type: 'date', value: addDays(start, 27) });

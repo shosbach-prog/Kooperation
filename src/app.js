@@ -138,6 +138,32 @@ function createApp(db, opts = {}) {
     || (u.admin_rechte === 'vertretung' && !!u.admin_bis && todayIso() <= u.admin_bis));
   const manager = (req, _res, next) => (hasMgr(req.user) ? next() : next(new HttpError(403, 'Nur für die Verwaltung / Einsatzplanung.')));
 
+  /**
+   * Verwaltungsbereich: Verwalter/innen und Vertretungen können auf bestimmte Stationen beschränkt sein
+   * (users.admin_units = JSON-Liste von Stations-IDs). Lesen dürfen sie alles, ändern nur in ihrem Bereich.
+   * Die Hauptverwaltung ist nie beschränkt.
+   */
+  const scopeOf = (u) => {
+    if (!u || isHaupt(u) || !u.admin_units) return null;
+    try { const a = JSON.parse(u.admin_units); return Array.isArray(a) && a.length ? new Set(a.map(Number)) : null; } catch { return null; }
+  };
+  const inScope = (u, unitId) => { const sc = scopeOf(u); return !sc || sc.has(Number(unitId)); };
+  const userInScope = (actor, targetId) => {
+    const sc = scopeOf(actor);
+    if (!sc || Number(targetId) === actor.id) return true;
+    const t = db.prepare('SELECT stammbereich_id FROM users WHERE id = ?').get(Number(targetId));
+    return !!t && sc.has(Number(t.stammbereich_id));
+  };
+  const requireUnit = (req, unitId) => {
+    if (!inScope(req.user, unitId)) throw new HttpError(403, 'Diese Station gehört nicht zu Ihrem Verwaltungsbereich.', 'BEREICH');
+  };
+  const requireUser = (req, targetId) => {
+    if (!userInScope(req.user, targetId)) throw new HttpError(403, 'Diese Person gehört nicht zu Ihrem Verwaltungsbereich (Stammbereich).', 'BEREICH');
+  };
+  /** nur Verwaltung ohne Beschränkung (Campus, Dienstzeiten, Einstellungen …) */
+  const managerFull = (req, _res, next) => (hasMgr(req.user) && !scopeOf(req.user) ? next()
+    : next(new HttpError(403, hasMgr(req.user) ? 'Nur für die Verwaltung des ganzen Campus.' : 'Nur für die Verwaltung / Einsatzplanung.', 'BEREICH')));
+
   const publicUser = (u) => ({
     id: u.id, name: u.name, username: u.username, role: u.role, qualification: u.qualification,
     weekly_hours: u.weekly_hours, min_hours_month: u.min_hours_month, stundenentgelt: u.stundenentgelt, active: !!u.active,
@@ -145,7 +171,7 @@ function createApp(db, opts = {}) {
     personalnummer: u.personalnummer, email: u.email, telefon: u.telefon, eintritt: u.eintritt, austritt: u.austritt,
     befristet_bis: u.befristet_bis, entgeltgruppe: u.entgeltgruppe, stufe: u.stufe, stammbereich_id: u.stammbereich_id,
     bemerkung: u.bemerkung, foto_version: u.foto_version || 0, admin_rechte: u.admin_rechte || 'keine', admin_bis: u.admin_bis,
-    is_manager: hasMgr(u), is_haupt: isHaupt(u),
+    is_manager: hasMgr(u), is_haupt: isHaupt(u), admin_units: scopeOf(u) ? [...scopeOf(u)] : [],
     totp_enabled: !!u.totp_enabled, locked: u.locked_until > Date.now(), recovery_left: JSON.parse(u.recovery_codes || '[]').length,
   });
 
@@ -295,7 +321,7 @@ function createApp(db, opts = {}) {
 
   // ---------- Einstellungen ----------
   app.get('/api/settings', auth, wrap(() => getSettings()));
-  app.put('/api/settings', auth, manager, wrap((req) => {
+  app.put('/api/settings', auth, managerFull, wrap((req) => {
     const upd = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
     for (const [k, def] of Object.entries(DEFAULT_SETTINGS)) {
       if (!(k in (req.body || {}))) continue;
@@ -348,6 +374,11 @@ function createApp(db, opts = {}) {
       if (v !== null && !db.prepare('SELECT 1 FROM units WHERE id = ?').get(v)) throw new HttpError(400, 'Bereich nicht gefunden.');
       out.stammbereich_id = v;
     }
+    if ('admin_units' in b) {
+      const list = Array.isArray(b.admin_units) ? [...new Set(b.admin_units.map(Number).filter(Number.isInteger))] : [];
+      for (const id of list) if (!db.prepare('SELECT 1 FROM units WHERE id = ?').get(id)) throw new HttpError(400, 'Station im Verwaltungsbereich nicht gefunden.');
+      out.admin_units = list.length ? JSON.stringify(list) : '';
+    }
     if ('admin_rechte' in b) {
       if (!['keine', 'voll', 'vertretung'].includes(b.admin_rechte)) throw new HttpError(400, 'Verwaltungsrechte ungültig.');
       out.admin_rechte = b.admin_rechte;
@@ -366,7 +397,7 @@ function createApp(db, opts = {}) {
   };
 
   /** Nur die Hauptverwaltung darf Rechte vergeben und andere Verwalter/innen bearbeiten. */
-  const RECHTE_FELDER = ['role', 'admin_rechte', 'admin_bis'];
+  const RECHTE_FELDER = ['role', 'admin_rechte', 'admin_bis', 'admin_units'];
   const isPrivileged = (u) => isHaupt(u) || (u.admin_rechte || 'keine') !== 'keine';
   const otherActiveHaupt = (id) => db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'manager' AND active = 1 AND id <> ?").get(id).n;
 
@@ -380,6 +411,10 @@ function createApp(db, opts = {}) {
     const f = userFields(req.body || {}, false);
     if (!isHaupt(req.user) && (f.role === 'manager' || (f.admin_rechte && f.admin_rechte !== 'keine'))) {
       throw new HttpError(403, 'Verwaltungsrechte kann nur die Hauptverwaltung vergeben.');
+    }
+    if (scopeOf(req.user)) {
+      if (!f.stammbereich_id) throw new HttpError(400, 'Bitte einen Stammbereich aus Ihrem Verwaltungsbereich wählen.', 'BEREICH');
+      requireUnit(req, f.stammbereich_id);
     }
     const pw = req.body.password;
     if (!pw || String(pw).length < 6) throw new HttpError(400, 'Startpasswort: mind. 6 Zeichen.');
@@ -403,6 +438,11 @@ function createApp(db, opts = {}) {
     if (!isHaupt(req.user)) {
       if (RECHTE_FELDER.some((k) => k in f)) throw new HttpError(403, 'Verwaltungsrechte kann nur die Hauptverwaltung vergeben.');
       if (id !== req.user.id && isPrivileged(existing)) throw new HttpError(403, 'Andere Verwalter/innen kann nur die Hauptverwaltung bearbeiten.');
+    }
+    requireUser(req, id);
+    if (scopeOf(req.user) && 'stammbereich_id' in f && id !== req.user.id) {
+      if (!f.stammbereich_id) throw new HttpError(400, 'Bitte einen Stammbereich aus Ihrem Verwaltungsbereich wählen.', 'BEREICH');
+      requireUnit(req, f.stammbereich_id);
     }
     if (f.username && db.prepare('SELECT 1 FROM users WHERE username = ? AND id <> ?').get(f.username, id)) throw new HttpError(409, 'Benutzername ist bereits vergeben.');
     if (id === req.user.id && (f.active === 0 || RECHTE_FELDER.some((k) => k in f))) {
@@ -479,7 +519,7 @@ function createApp(db, opts = {}) {
     };
   };
   app.get('/api/units', auth, wrap(() => loadUnits()));
-  app.post('/api/units', auth, manager, wrap((req) => {
+  app.post('/api/units', auth, managerFull, wrap((req) => {
     const f = unitFields(req.body || {});
     const id = db.prepare('INSERT INTO units (name, kuerzel, telefon, leitung_id, building_id, active) VALUES (?, ?, ?, ?, ?, ?)')
       .run(f.name, f.kuerzel, f.telefon, f.leitung_id, f.building_id, f.active).lastInsertRowid;
@@ -494,7 +534,7 @@ function createApp(db, opts = {}) {
     audit(req.user.id, 'unit.create', { id, ...f, kopiert });
     return { ...loadUnits().find((u) => u.id === id), kopiert };
   }));
-  app.put('/api/units/:id', auth, manager, wrap((req) => {
+  app.put('/api/units/:id', auth, managerFull, wrap((req) => {
     const id = Number(req.params.id);
     const cur = db.prepare('SELECT * FROM units WHERE id = ?').get(id);
     if (!cur) throw new HttpError(404, 'Station nicht gefunden.');
@@ -504,7 +544,7 @@ function createApp(db, opts = {}) {
     audit(req.user.id, 'unit.update', { id, ...f, alt: cur.name });
     return loadUnits().find((u) => u.id === id);
   }));
-  app.delete('/api/units/:id', auth, manager, wrap((req) => {
+  app.delete('/api/units/:id', auth, managerFull, wrap((req) => {
     const id = Number(req.params.id);
     const n = db.prepare('SELECT COUNT(*) AS n FROM shifts WHERE unit_id = ?').get(id).n;
     if (n > 0) throw new HttpError(409, `Für diese Station gibt es ${n} Schichten. Bitte stattdessen deaktivieren.`, 'HAS_SHIFTS');
@@ -534,14 +574,14 @@ function createApp(db, opts = {}) {
     for (const u of unitIds) upd.run(id, Number(u));
   };
   app.get('/api/verbuende', auth, wrap(() => loadVerbuende()));
-  app.post('/api/verbuende', auth, manager, wrap((req) => {
+  app.post('/api/verbuende', auth, managerFull, wrap((req) => {
     const f = verbundFields(req.body || {});
     const id = db.prepare('INSERT INTO verbuende (name, beschreibung, gemeinsam, active) VALUES (?, ?, ?, ?)').run(f.name, f.beschreibung, f.gemeinsam, f.active).lastInsertRowid;
     setVerbundUnits(id, req.body.unit_ids);
     audit(req.user.id, 'verbund.create', { id, ...f, unit_ids: req.body.unit_ids });
     return loadVerbuende().find((v) => v.id === id);
   }));
-  app.put('/api/verbuende/:id', auth, manager, wrap((req) => {
+  app.put('/api/verbuende/:id', auth, managerFull, wrap((req) => {
     const id = Number(req.params.id);
     const cur = db.prepare('SELECT * FROM verbuende WHERE id = ?').get(id);
     if (!cur) throw new HttpError(404, 'Verbund nicht gefunden.');
@@ -551,7 +591,7 @@ function createApp(db, opts = {}) {
     audit(req.user.id, 'verbund.update', { id, ...f, unit_ids: req.body.unit_ids });
     return loadVerbuende().find((v) => v.id === id);
   }));
-  app.delete('/api/verbuende/:id', auth, manager, wrap((req) => {
+  app.delete('/api/verbuende/:id', auth, managerFull, wrap((req) => {
     const id = Number(req.params.id);
     db.prepare('UPDATE units SET verbund_id = NULL WHERE verbund_id = ?').run(id);
     db.prepare('DELETE FROM verbuende WHERE id = ?').run(id);
@@ -578,7 +618,7 @@ function createApp(db, opts = {}) {
     };
   };
   app.get('/api/buildings', auth, wrap(() => loadBuildings()));
-  app.post('/api/buildings', auth, manager, wrap((req) => {
+  app.post('/api/buildings', auth, managerFull, wrap((req) => {
     const f = buildingFields(req.body || {});
     if (!('sort' in (req.body || {}))) f.sort = (db.prepare('SELECT MAX(sort) AS m FROM buildings').get().m || 0) + 1;
     const id = db.prepare('INSERT INTO buildings (name, kuerzel, beschreibung, sort, active) VALUES (?, ?, ?, ?, ?)')
@@ -586,7 +626,7 @@ function createApp(db, opts = {}) {
     audit(req.user.id, 'building.create', { id, ...f });
     return loadBuildings().find((b) => b.id === id);
   }));
-  app.put('/api/buildings/:id', auth, manager, wrap((req) => {
+  app.put('/api/buildings/:id', auth, managerFull, wrap((req) => {
     const id = Number(req.params.id);
     const cur = db.prepare('SELECT * FROM buildings WHERE id = ?').get(id);
     if (!cur) throw new HttpError(404, 'Gebäude nicht gefunden.');
@@ -596,7 +636,7 @@ function createApp(db, opts = {}) {
     audit(req.user.id, 'building.update', { id, ...f, alt: cur.name });
     return loadBuildings().find((b) => b.id === id);
   }));
-  app.delete('/api/buildings/:id', auth, manager, wrap((req) => {
+  app.delete('/api/buildings/:id', auth, managerFull, wrap((req) => {
     const id = Number(req.params.id);
     // Stationen bleiben erhalten und sind danach keinem Gebäude zugeordnet
     const n = Number(db.prepare('UPDATE units SET building_id = NULL WHERE building_id = ?').run(id).changes);
@@ -631,6 +671,7 @@ function createApp(db, opts = {}) {
     const t = db.prepare('SELECT * FROM users WHERE id = ?').get(Number(req.params.id));
     if (!t) throw new HttpError(404, 'Nicht gefunden.');
     if (!isHaupt(req.user) && t.id !== req.user.id && isPrivileged(t)) throw new HttpError(403, 'Andere Verwalter/innen kann nur die Hauptverwaltung bearbeiten.');
+    requireUser(req, t.id);
     return t;
   };
   app.post('/api/users/:id/foto', auth, manager, rawFoto, wrap((req) => saveFoto(req, fotoTarget(req).id)));
@@ -664,7 +705,7 @@ function createApp(db, opts = {}) {
     };
   };
 
-  app.post('/api/shift-types', auth, manager, wrap((req) => {
+  app.post('/api/shift-types', auth, managerFull, wrap((req) => {
     const f = shiftTypeFields(req.body || {});
     const id = db.prepare('INSERT INTO shift_types (name, code, start_time, end_time, break_min, color, active) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(f.name, f.code, f.start_time, f.end_time, f.break_min, f.color, f.active).lastInsertRowid;
@@ -672,7 +713,7 @@ function createApp(db, opts = {}) {
     return db.prepare('SELECT * FROM shift_types WHERE id = ?').get(id);
   }));
 
-  app.put('/api/shift-types/:id', auth, manager, wrap((req) => {
+  app.put('/api/shift-types/:id', auth, managerFull, wrap((req) => {
     const id = Number(req.params.id);
     const cur = db.prepare('SELECT * FROM shift_types WHERE id = ?').get(id);
     if (!cur) throw new HttpError(404, 'Nicht gefunden.');
@@ -699,6 +740,7 @@ function createApp(db, opts = {}) {
     db.exec('BEGIN');
     try {
       for (const r of rows) {
+        requireUnit(req, r.unit_id);
         const min = Number(r.min_staff) || 0;
         const max = r.max_staff === null || r.max_staff === '' || r.max_staff === undefined ? null : Number(r.max_staff);
         if (min < 0 || (max !== null && (max < min || !Number.isInteger(max)))) throw new HttpError(400, 'Maximum muss ≥ Minimum sein.');
@@ -717,7 +759,8 @@ function createApp(db, opts = {}) {
     if ((T.parseDate(to) - T.parseDate(from)) / T.DAY > 366) throw new HttpError(400, 'Maximal ein Jahr auf einmal.');
     const unitIds = Array.isArray(req.body.unit_ids) && req.body.unit_ids.length
       ? req.body.unit_ids.map(Number)
-      : db.prepare('SELECT id FROM units WHERE active = 1').all().map((u) => u.id);
+      : db.prepare('SELECT id FROM units WHERE active = 1').all().map((u) => u.id).filter((id) => inScope(req.user, id));
+    for (const id of unitIds) requireUnit(req, id);
     const reqs = db.prepare(`SELECT r.*, st.start_time, st.end_time, st.break_min FROM requirements r
       JOIN shift_types st ON st.id = r.shift_type_id WHERE st.active = 1 AND (r.min_staff > 0 OR r.max_staff > 0)`).all()
       .filter((r) => unitIds.includes(r.unit_id));
@@ -742,7 +785,7 @@ function createApp(db, opts = {}) {
   // ---------- Logo hochladen / entfernen (Manager) ----------
   const setSetting = (k, v) => db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
     .run(k, JSON.stringify(v));
-  app.post('/api/branding/logo', auth, manager, express.raw({ type: () => true, limit: 2 * 1024 * 1024 }), wrap((req) => {
+  app.post('/api/branding/logo', auth, managerFull, express.raw({ type: () => true, limit: 2 * 1024 * 1024 }), wrap((req) => {
     const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
     const mime = sniffMime(buf);
     if (!LOGO_TYPES[mime]) throw new HttpError(400, 'Logo bitte als PNG oder JPG (max. 2 MB) hochladen.');
@@ -755,7 +798,7 @@ function createApp(db, opts = {}) {
     audit(req.user.id, 'branding.logo', { mime, size: buf.length });
     return branding();
   }));
-  app.delete('/api/branding/logo', auth, manager, wrap((req) => {
+  app.delete('/api/branding/logo', auth, managerFull, wrap((req) => {
     const old = logoFile();
     if (old) fs.rmSync(old.file, { force: true });
     setSetting('logo_mime', '');
@@ -777,7 +820,7 @@ function createApp(db, opts = {}) {
   };
 
   app.get('/api/qual-rules', auth, manager, wrap(() => loadRules()));
-  app.post('/api/qual-rules', auth, manager, wrap((req) => {
+  app.post('/api/qual-rules', auth, managerFull, wrap((req) => {
     const b = req.body || {};
     const qualification = String(b.qualification || '').trim();
     const min = Number(b.min_count);
@@ -790,7 +833,7 @@ function createApp(db, opts = {}) {
     audit(req.user.id, 'qual_rule.create', { id, unitId, typeId, qualification, min });
     return loadRules();
   }));
-  app.delete('/api/qual-rules/:id', auth, manager, wrap((req) => {
+  app.delete('/api/qual-rules/:id', auth, managerFull, wrap((req) => {
     db.prepare('DELETE FROM qual_rules WHERE id = ?').run(Number(req.params.id));
     audit(req.user.id, 'qual_rule.delete', { id: Number(req.params.id) });
     return loadRules();
@@ -911,6 +954,7 @@ function createApp(db, opts = {}) {
     const id = Number(req.params.id);
     const s = db.prepare('SELECT * FROM shifts WHERE id = ?').get(id);
     if (!s) throw new HttpError(404, 'Schicht nicht gefunden.');
+    requireUnit(req, s.unit_id);
     const b = req.body || {};
     const min = 'min_staff' in b ? Number(b.min_staff) : s.min_staff;
     const max = 'max_staff' in b ? (b.max_staff === null || b.max_staff === '' ? null : Number(b.max_staff)) : s.max_staff;
@@ -923,6 +967,8 @@ function createApp(db, opts = {}) {
 
   app.delete('/api/shifts/:id', auth, manager, wrap((req) => {
     const id = Number(req.params.id);
+    const sh = db.prepare('SELECT unit_id FROM shifts WHERE id = ?').get(id);
+    if (sh) requireUnit(req, sh.unit_id);
     const n = db.prepare('SELECT COUNT(*) AS n FROM assignments WHERE shift_id = ?').get(id).n;
     if (n > 0 && !req.query.force) throw new HttpError(409, `In dieser Schicht sind ${n} Person(en) eingetragen.`, 'HAS_ASSIGNMENTS');
     db.prepare('DELETE FROM shifts WHERE id = ?').run(id);
@@ -961,7 +1007,8 @@ function createApp(db, opts = {}) {
     const settings = getSettings();
     const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(Number(req.params.id));
     if (!shift) throw new HttpError(404, 'Schicht nicht gefunden.');
-    const isMgr = hasMgr(req.user);
+    const isMgr = hasMgr(req.user) && inScope(req.user, shift.unit_id);
+    if (hasMgr(req.user) && !isMgr && req.body?.user_id && Number(req.body.user_id) !== req.user.id) requireUnit(req, shift.unit_id);
     const userId = isMgr && req.body?.user_id ? Number(req.body.user_id) : req.user.id;
     const target = db.prepare('SELECT * FROM users WHERE id = ? AND active = 1').get(userId);
     if (!target) throw new HttpError(404, 'Mitarbeiter/in nicht gefunden.');
@@ -994,7 +1041,8 @@ function createApp(db, opts = {}) {
     const settings = getSettings();
     const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(Number(req.params.id));
     if (!shift) throw new HttpError(404, 'Schicht nicht gefunden.');
-    const isMgr = hasMgr(req.user);
+    const isMgr = hasMgr(req.user) && inScope(req.user, shift.unit_id);
+    if (hasMgr(req.user) && !isMgr && req.query.user_id && Number(req.query.user_id) !== req.user.id) requireUnit(req, shift.unit_id);
     const userId = isMgr && req.query.user_id ? Number(req.query.user_id) : req.user.id;
     if (!db.prepare('SELECT 1 FROM assignments WHERE shift_id = ? AND user_id = ?').get(shift.id, userId)) throw new HttpError(404, 'Nicht eingetragen.');
     const reason = readReason(req, !isMgr && settings.begruendung_austragen);
@@ -1046,7 +1094,8 @@ function createApp(db, opts = {}) {
     if (!verbund || to.verbund_id !== from.verbund_id || to.id === from.id || to.date !== from.date || to.shift_type_id !== from.shift_type_id) {
       throw new HttpError(400, 'Umsetzen ist nur in denselben Dienst einer verbundenen Station möglich.', 'KEIN_VERBUND');
     }
-    const isMgr = hasMgr(req.user);
+    const isMgr = hasMgr(req.user) && inScope(req.user, from.unit_id) && inScope(req.user, to.unit_id);
+    if (hasMgr(req.user) && !isMgr && req.body?.user_id && Number(req.body.user_id) !== req.user.id) requireUnit(req, inScope(req.user, from.unit_id) ? to.unit_id : from.unit_id);
     const userId = isMgr && req.body?.user_id ? Number(req.body.user_id) : req.user.id;
     if (!db.prepare('SELECT 1 FROM assignments WHERE shift_id = ? AND user_id = ?').get(from.id, userId)) throw new HttpError(404, 'Person ist in diesem Dienst nicht eingetragen.');
     if (db.prepare('SELECT 1 FROM assignments WHERE shift_id = ? AND user_id = ?').get(to.id, userId)) throw new HttpError(409, 'Bereits auf der anderen Station eingetragen.');
@@ -1170,6 +1219,7 @@ function createApp(db, opts = {}) {
     const b = req.body || {};
     const isMgr = hasMgr(req.user);
     const userId = isMgr && b.user_id ? Number(b.user_id) : req.user.id;
+    if (userId !== req.user.id) requireUser(req, userId);
     const u = db.prepare('SELECT * FROM users WHERE id = ? AND active = 1').get(userId);
     if (!u) throw new HttpError(404, 'Mitarbeiter/in nicht gefunden.');
     if (!ABS_TYPES.includes(b.type)) throw new HttpError(400, 'Unbekannte Art der Abwesenheit.');
@@ -1227,6 +1277,7 @@ function createApp(db, opts = {}) {
     const settings = getSettings();
     const a = loadAbsence(req);
     if (a.type === 'krank') throw new HttpError(400, 'Krankmeldungen werden nicht genehmigt.');
+    requireUser(req, a.user_id);
     if (a.user_id === req.user.id) throw new HttpError(403, 'Eigene Anträge muss eine andere Verwaltung genehmigen.');
     const status = req.body?.status;
     if (!['genehmigt', 'abgelehnt'].includes(status)) throw new HttpError(400, 'Status ungültig.');
@@ -1246,7 +1297,8 @@ function createApp(db, opts = {}) {
   app.put('/api/absences/:id', auth, wrap((req) => {
     const settings = getSettings();
     const a = loadAbsence(req);
-    const isMgr = hasMgr(req.user);
+    const isMgr = hasMgr(req.user) && userInScope(req.user, a.user_id);
+    if (!isMgr && a.user_id !== req.user.id) throw new HttpError(403, 'Diese Person gehört nicht zu Ihrem Verwaltungsbereich.', 'BEREICH');
     if (!isMgr && a.type !== 'krank') throw new HttpError(403, 'Urlaubsanträge können nur zurückgezogen werden.');
     const to = req.body?.to;
     const from = isMgr && isoDate(req.body?.from) ? req.body.from : a.from_date;
@@ -1266,7 +1318,8 @@ function createApp(db, opts = {}) {
 
   app.delete('/api/absences/:id', auth, wrap((req) => {
     const a = loadAbsence(req);
-    const isMgr = hasMgr(req.user);
+    const isMgr = hasMgr(req.user) && userInScope(req.user, a.user_id);
+    if (!isMgr && a.user_id !== req.user.id) throw new HttpError(403, 'Diese Person gehört nicht zu Ihrem Verwaltungsbereich.', 'BEREICH');
     if (!isMgr && !(a.type !== 'krank' && a.status === 'beantragt')) {
       throw new HttpError(403, 'Nur noch nicht entschiedene Urlaubsanträge können zurückgezogen werden. Bitte wenden Sie sich an die Einsatzplanung.');
     }
@@ -1290,6 +1343,7 @@ function createApp(db, opts = {}) {
   app.post('/api/absences/:id/attachments', auth, express.raw({ type: () => true, limit: MAX_UPLOAD }), wrap((req) => {
     const a = loadAbsence(req);
     if (a.type !== 'krank') throw new HttpError(400, 'Bescheinigungen können nur zu Krankmeldungen hochgeladen werden.');
+    if (a.user_id !== req.user.id) requireUser(req, a.user_id);
     const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
     if (!buf.length) throw new HttpError(400, 'Keine Datei empfangen.');
     const mime = sniffMime(buf);
@@ -1328,6 +1382,7 @@ function createApp(db, opts = {}) {
   app.delete('/api/attachments/:id', auth, wrap((req) => {
     const f = loadAttachment(req);
     if (!hasMgr(req.user) && f.uploaded_by !== req.user.id) throw new HttpError(403, 'Nicht erlaubt.');
+    if (f.user_id !== req.user.id) requireUser(req, f.user_id);
     fs.rmSync(path.join(uploadDir, f.stored_name), { force: true });
     db.prepare('DELETE FROM attachments WHERE id = ?').run(f.id);
     audit(req.user.id, 'attachment.delete', { id: f.id, absence_id: f.absence_id });
@@ -1418,6 +1473,7 @@ function createApp(db, opts = {}) {
     db, T, TOTP, HttpError, auth, manager, wrap, audit, getSettings, isoDate, isTime, nowLocalMs, todayIso,
     hasMgr, isHaupt, publicUser, loadShifts, loadRules, qualMissing, verbundGroup, checkConflicts, absenceOn, uploadDir, express,
     hooks, shiftLabel, managerIds, decorateAbsence, timers: opts.timers !== false,
+    scopeOf, inScope, userInScope, requireUnit, requireUser, managerFull,
   };
   for (const name of fs.readdirSync(path.join(__dirname, 'routes')).filter((f) => f.endsWith('.js')).sort()) {
     require(path.join(__dirname, 'routes', name))(app, ctx);

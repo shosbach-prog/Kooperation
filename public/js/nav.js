@@ -41,16 +41,16 @@ const VIEWS = {
   account: { label: 'Mein Profil', short: 'Profil', icon: 'user', group: 'mein', render: () => renderAccount() },
   abwesenheiten: { label: 'Abwesenheiten', short: 'Anträge', icon: 'inbox', group: 'verw', render: () => renderAbsencesMgr(), mgr: true, badge: 'abwesenheiten' },
   staff: { label: 'Personal', icon: 'users', group: 'verw', render: () => renderStaff(), mgr: true },
-  stationen: { label: 'Campus & Stationen', short: 'Campus', icon: 'campus', group: 'verw', render: () => renderStations(), mgr: true },
+  stationen: { label: 'Campus & Stationen', short: 'Campus', icon: 'campus', group: 'verw', render: () => renderStations(), mgr: true, full: true },
   generate: { label: 'Plan erzeugen', icon: 'wand', group: 'verw', render: () => renderGenerate(), mgr: true },
-  types: { label: 'Dienstzeiten', icon: 'clock', group: 'verw', render: () => renderShiftTypes(), mgr: true },
+  types: { label: 'Dienstzeiten', icon: 'clock', group: 'verw', render: () => renderShiftTypes(), mgr: true, full: true },
   req: { label: 'Mindestbesetzung', icon: 'sliders', group: 'verw', render: () => renderRequirements(), mgr: true },
   report: { label: 'Auswertung TVöD', short: 'Auswertung', icon: 'chart', group: 'verw', render: () => renderReport(), mgr: true },
   log: { label: 'Protokoll', icon: 'log', group: 'verw', render: () => renderLog(), mgr: true },
-  settings: { label: 'Einstellungen', icon: 'settings', group: 'verw', render: () => renderSettings(), mgr: true },
+  settings: { label: 'Einstellungen', icon: 'settings', group: 'verw', render: () => renderSettings(), mgr: true, full: true },
 };
 const GROUPS = { mein: 'Mein Dienst', verw: 'Verwaltung' };
-const viewAllowed = (v) => (v.mgr ? isMgr() : v.staff ? isStaffRole() : true);
+const viewAllowed = (v) => (v.full ? isFullMgr() : v.mgr ? isMgr() : v.staff ? isStaffRole() : true);
 
 /** Schnellzugriff unten (Handy/Tablet), je nach Rolle */
 function bottomKeys() {
