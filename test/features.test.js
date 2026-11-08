@@ -557,3 +557,36 @@ test('Ist-Zeiten, Bereitschaftsdienst und Rufbereitschaft', async () => {
   // Typen wieder deaktivieren, damit andere Tests unberührt bleiben
   await mgr('PUT', '/api/requirements', reqs.map((x) => ({ ...x, min_staff: 0 })));
 });
+
+test('Exporte: Lohn-Übergabe und Aushang', async () => {
+  const month = day(12).slice(0, 7);
+  const n = await shiftOn(day(12), 'N');
+  await mgr('POST', `/api/shifts/${n.id}/assign`, { user_id: users.abecker, force: true });
+  await mgr('PUT', `/api/users/${users.abecker}`, { personalnummer: '4711' });
+  const l = (await mgr('GET', `/api/export/lohn?month=${month}`)).data;
+  const anna = l.lines.filter((x) => x.personalnummer === '4711');
+  assert.ok(anna.some((x) => x.schluessel === 'stunden' && x.lohnart === '1000' && x.menge > 0));
+  assert.ok(anna.some((x) => x.schluessel === 'nacht' && x.menge > 0));
+  assert.ok(l.fehlend.length > 0); // Demo-Personal ohne Personalnummer
+  // eigene Lohnart-Nummer
+  await mgr('PUT', '/api/settings', { lohnarten: ['nacht=9999'] });
+  const csv = (await mgr('GET', `/api/export/lohn.csv?month=${month}`));
+  assert.match(csv.headers.get('content-disposition'), /lohn-/);
+  assert.match(csv.data, /"4711";"Anna Becker";"[0-9-]+";"9999";"Zeitzuschlag Nachtarbeit"/);
+  assert.match(csv.data, /"stunden"/); // ohne Nummer → Schlüssel
+  await mgr('PUT', '/api/settings', { lohnarten: ['stunden=1000', 'nacht=1110'] });
+  // Mitarbeitende: kein Zugriff
+  const anna2 = await as('abecker');
+  assert.equal((await anna2('GET', `/api/export/lohn.csv?month=${month}`)).status, 403);
+  assert.equal((await anna2('GET', `/api/export/aushang?unit_id=${n.unit_id}&from=${day(10)}&to=${day(14)}`)).status, 403);
+  // Aushang
+  const a = await mgr('GET', `/api/export/aushang?unit_id=${n.unit_id}&from=${day(10)}&to=${day(14)}`);
+  assert.equal(a.status, 200);
+  assert.match(a.headers.get('content-type'), /text\/html/);
+  assert.match(a.data, /Dienstplan Station 1/);
+  assert.match(a.data, /Anna Becker/);
+  assert.match(a.data, /size: A4 landscape/);
+  assert.doesNotMatch(a.data, /krank|Urlaub/i);
+  assert.equal((await mgr('GET', `/api/export/aushang?unit_id=${n.unit_id}&from=${day(0)}&to=${day(60)}`)).status, 400);
+  assert.equal((await mgr('GET', `/api/export/aushang?unit_id=99999&from=${day(0)}&to=${day(6)}`)).status, 404);
+});

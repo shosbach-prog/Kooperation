@@ -32,7 +32,8 @@ async function renderPlan() {
     h('strong', {}, `KW ${kw} · ${fmtDate(from)} – ${fmtDate(to)}`),
     h('span', { class: 'spacer' }),
     unitSelect,
-    h('button', { class: 'ghost', onclick: () => window.print() }, 'Drucken'));
+    h('button', { class: 'ghost', onclick: () => window.print() }, 'Drucken'),
+    isMgr() ? h('button', { class: 'ghost', onclick: () => aushangDialog({ unit: f }) }, 'Aushang') : null);
 
   const legend = h('div', { class: 'legend' },
     h('span', { class: 'l-bad' }, 'unter Mindestbesetzung'), h('span', { class: 'l-covered' }, 'im Verbund ausgeglichen'),

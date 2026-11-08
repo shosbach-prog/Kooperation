@@ -42,6 +42,10 @@ const DEFAULT_SETTINGS = {
   max_tage_folge: 6,
   zulage_wechselschicht_eur: 155,
   zulage_schicht_eur: 40,
+  // Lohnart-Nummern für die Übergabe an die Entgeltabrechnung (Schlüssel=Nummer); bitte mit der Personalabteilung abstimmen
+  lohnarten: ['stunden=1000', 'ueberstunden=1010', 'nacht=1110', 'samstag=1120', 'sonntag=1130', 'feiertag=1140', 'vorfest=1150', 'zuschlaege_eur=1190',
+    'zulage=1200', 'bereitschaft=1300', 'ruf_pauschale=1400', 'ruf_einsatz=1410', 'urlaub_tage=2000', 'krank_tage=2100', 'sonder_tage=2200',
+    'fortbildung_tage=2300', 'unbezahlt_tage=2400'],
   wechselschicht_min_naechte: 2,
 };
 

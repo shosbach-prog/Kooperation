@@ -157,6 +157,7 @@ async function renderSettings() {
     ['urlaubstage_standard', 'Urlaubstage pro Jahr (Standard für neue Mitarbeitende)', 'number', 'TVöD § 26: 30 Arbeitstage bei 5-Tage-Woche'],
     ['au_ab_tag', 'AU-Bescheinigung erforderlich ab Krankheitstag', 'number', 'EFZG § 5: ab dem 4. Kalendertag; 1 = ab dem ersten Tag'],
     ['qualifikationen', 'Qualifikationen (eine pro Zeile)', 'list'],
+    ['lohnarten', 'Lohnart-Nummern für die Lohn-Übergabe (Schlüssel=Nummer, eine pro Zeile)', 'list', 'Mit der Entgeltabrechnung abstimmen. Schlüssel: stunden, ueberstunden, nacht, samstag, sonntag, feiertag, vorfest, zuschlaege_eur, zulage, bereitschaft, ruf_pauschale, ruf_einsatz, urlaub_tage, krank_tage, sonder_tage, fortbildung_tage, unbezahlt_tage'],
     ['ruhezeit_std', 'Mindestruhezeit zwischen zwei Diensten (Std.)', 'number', '§ 5 ArbZG: 11 Std.; in Krankenhäusern unter Bedingungen 10 Std.'],
     ['nacht_von', 'Nachtarbeit von', 'time'], ['nacht_bis', 'Nachtarbeit bis', 'time', 'TVöD § 7 Abs. 5: 21–6 Uhr'],
     ['zuschlag_nacht', 'Zuschlag Nachtarbeit (%)', 'number'],

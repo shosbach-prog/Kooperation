@@ -72,8 +72,8 @@ function zuschlagTable(rows, withName) {
 
 // ---------- Auswertung (Manager) ----------
 async function renderReport() {
-  const r = await api('GET', `api/report?month=${state.month}`);
-  setMain(h('div', { class: 'card' },
+  const [r, exp] = await Promise.all([api('GET', `api/report?month=${state.month}`), exportCard()]);
+  setMain(exp, h('div', { class: 'card' },
     h('div', { class: 'toolbar' },
       h('label', {}, 'Monat', h('input', { type: 'month', value: state.month, onchange: (e) => { state.month = e.target.value; renderReport(); } })),
       h('span', { class: 'spacer' }),
