@@ -1,7 +1,7 @@
 'use strict';
 /* Passkeys: Anmeldung mit Fingerabdruck, Gesichtserkennung oder Geräte-PIN (WebAuthn) */
 
-const passkeySupported = () => !!(window.PublicKeyCredential && navigator.credentials && window.isSecureContext);
+const passkeySupported = () => !state.branding?.demo && !!(window.PublicKeyCredential && navigator.credentials && window.isSecureContext);
 
 const b64u = {
   enc: (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''),

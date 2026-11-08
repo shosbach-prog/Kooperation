@@ -483,3 +483,23 @@ button.demo-person:hover { border-color: var(--primary); background: color-mix(i
 .demo-neu-wrap summary, .demo-pw summary { cursor: pointer; font-weight: 600; padding: .4rem 0; min-height: 32px; }
 .demo-neu { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); align-items: end; margin-top: .5rem; }
 .demo-switch { margin-left: .4rem; white-space: nowrap; }
+.demo-teaser { border: 1px solid var(--line); border-radius: var(--radius); padding: .9rem; margin: .8rem 0 1rem; background: color-mix(in srgb, var(--primary) 5%, var(--card)); }
+.demo-teaser h2 { font-size: 1.05rem; margin: 0 0 .2rem; }
+.demo-teaser p { margin: .2rem 0 .6rem; }
+.demo-rollen { display: grid; gap: .5rem; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+a.demo-rolle { display: flex; gap: .6rem; align-items: flex-start; padding: .75rem; border-radius: var(--radius-sm); background: var(--primary); color: var(--primary-ink); text-decoration: none; min-height: 64px; }
+a.demo-rolle:hover { filter: brightness(1.08); }
+a.demo-rolle .icon { flex: none; margin-top: .1rem; }
+a.demo-rolle span { display: grid; gap: .15rem; }
+a.demo-rolle strong { font-size: 1.05rem; }
+.login-echt { font-size: 1.05rem; margin: .4rem 0 0; }
+.demo-live { text-align: center; margin-top: 1rem; }
+.demo-switch .demo-kurz { display: none; }
+@media (max-width: 1099px) {
+  .demo-switch .demo-lang { display: none; }
+  .demo-switch .demo-kurz { display: inline; }
+  .demo-switch { padding: .3rem .5rem; margin-left: .25rem; }
+}
+.who #who { gap: .4rem; align-items: center; }
+.who #who .avatar, .who #who .demo-switch { flex: none; }
+@media (max-width: 1099px) { .who #who, .who #who .person { flex: none; } body.demo #logout { display: none; } }

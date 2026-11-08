@@ -17,6 +17,19 @@ function personButton(p) {
     h('span', { class: 'demo-person-text' }, h('strong', {}, p.name), h('span', { class: 'small muted' }, p.beschreibung)));
 }
 
+/** Direktaufruf von der Startseite (demo/?als=leitung | pflege | station): Rolle sofort übernehmen,
+ *  auch wenn man in der Demo gerade mit einer anderen Rolle angemeldet ist. Liefert true, wenn erledigt. */
+async function demoAutoLogin() {
+  const als = new URLSearchParams(location.search).get('als');
+  if (!isDemo() || !als) return false;
+  history.replaceState(null, '', location.pathname);
+  const wer = { leitung: 'manager', station: 'skrueger', pflege: 'abecker' }[als];
+  if (!wer) return false;
+  try { await api('POST', 'api/demo/login', { username: wer }); } catch { return false; }
+  await boot();
+  return true;
+}
+
 /** Ergänzt die Anmeldeseite um die Rollenauswahl; das normale Formular wandert in „Mit Passwort anmelden“ */
 async function demoLogin(section) {
   section.classList.add('demo-login');
@@ -52,14 +65,34 @@ async function demoLogin(section) {
     h('div', { class: 'demo-grid' }, d.leitung.map(personButton)),
     h('h2', { class: 'demo-h' }, 'Pflege'),
     h('div', { class: 'demo-grid' }, d.pflege.map(personButton)),
-    h('details', { class: 'demo-neu-wrap' }, h('summary', {}, '＋ Als neue Person ausprobieren'), neu));
+    h('details', { class: 'demo-neu-wrap' }, h('summary', {}, '＋ Als neue Person ausprobieren'), neu),
+    state.branding.live_link ? h('p', { class: 'demo-live' }, h('a', { href: state.branding.live_link }, '→ Zur Anmeldung mit echten Daten')) : null);
+  details.remove(); // Passwort-Anmeldung gibt es im Demo-Bereich nicht – dafür die echte Anmeldung
 }
 
 /** In der App: Hinweis „Demo“ und schneller Rollenwechsel */
 function demoWho() {
+  document.body.classList.toggle('demo', isDemo());
   if (!isDemo()) return null;
-  return h('button', { type: 'button', class: 'ghost tiny demo-switch', title: 'Andere Rolle wählen', onclick: async () => {
+  return h('button', { type: 'button', class: 'ghost tiny demo-switch', title: 'Demo: andere Rolle wählen', 'aria-label': 'Demo: Rolle wechseln', onclick: async () => {
     await api('POST', 'api/logout').catch(() => {});
     state.me = null; location.hash = ''; renderLogin();
-  } }, 'Demo · Rolle wechseln');
+  } }, h('span', { class: 'demo-lang', 'aria-hidden': 'true' }, 'Demo · Rolle wechseln'), h('span', { class: 'demo-kurz', 'aria-hidden': 'true' }, 'Demo ⇄'));
+}
+
+/** Startseite des Echtbetriebs: Demo mit einem Klick, darunter die normale Anmeldung */
+function demoTeaser(section) {
+  const link = state.branding.demo_link;
+  const brand = section.querySelector('.login-brand');
+  const rolle = (als, titel, text, ico) => h('a', { class: 'demo-rolle', href: `${link}?als=${als}` },
+    icon(ico), h('span', {}, h('strong', {}, titel), h('span', { class: 'small' }, text)));
+  brand.after(
+    h('div', { class: 'demo-teaser' },
+      h('h2', {}, 'Ausprobieren – ohne Anmeldung'),
+      h('p', { class: 'small muted' }, 'Mit Beispieldaten, getrennt von den echten Daten. Einfach eine Rolle wählen:'),
+      h('div', { class: 'demo-rollen' },
+        rolle('leitung', 'Als Leitung', 'Pflegedienstleitung: Plan, Personal, Anträge, Auswertung', 'users'),
+        rolle('pflege', 'Als Pflegekraft', 'Eigene Dienste, Urlaub, Tausch, Wünsche', 'user')),
+      h('p', { class: 'small' }, h('a', { href: link }, 'Weitere Rollen (z. B. Stationsleitung) oder neue Person anlegen'))),
+    h('h2', { class: 'login-echt' }, 'Anmelden mit echten Daten'));
 }

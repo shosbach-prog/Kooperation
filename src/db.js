@@ -404,13 +404,13 @@ function migrate(db) {
     .run(JSON.stringify('LWL-Klinik Dortmund'), JSON.stringify('KWL Klinik Dortmund'));
 }
 
-function openDb(file) {
+function openDb(file, { demo } = {}) {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
   db.exec(SCHEMA);
   migrate(db);
-  seed(db, process.env.SEED_DEMO !== '0');
+  seed(db, demo ?? process.env.SEED_DEMO !== '0');
   return db;
 }
 

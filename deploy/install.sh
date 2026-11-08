@@ -125,18 +125,20 @@ EOF
   chmod 600 "$DEPLOY_DIR/.env"
   umask 022
 fi
-# Demo-Modus (Anmeldung per Rollenauswahl ohne Passwort/Code) – nur für Vorführungen ohne echte Daten
-if ! grep -q '^DEMO_MODUS=' "$DEPLOY_DIR/.env"; then
+# Demo-Bereich: getrennte Beispieldaten unter <Adresse>/demo/, Rollenauswahl ohne Passwort/Code
+if ! grep -q '^DEMO_BEREICH=' "$DEPLOY_DIR/.env"; then
   echo
-  echo "Demo-Modus: Auf der Startseite wählt man eine Rolle (Pflegedienstleitung, Stationsleitung, Pflegekraft)"
-  echo "und ist sofort angemeldet – ohne Passwort und ohne Authenticator-Code. NUR für Vorführungen ohne echte Daten!"
-  if grep -q '^SEED_DEMO=1' "$DEPLOY_DIR/.env"; then
-    read -r -p "Demo-Modus einschalten? [J/n] " DM; DM="${DM:-j}"
-  else
-    read -r -p "Demo-Modus einschalten? [j/N] " DM; DM="${DM:-n}"
-  fi
-  if [[ "$DM" =~ ^[JjYy] ]]; then DM=1; else DM=0; fi
-  printf '\n# Demo-Modus: 1 = Rollenauswahl ohne Passwort/2FA (nur ohne echte Daten!), 0 = normaler Betrieb\nDEMO_MODUS=%s\n' "$DM" >> "$DEPLOY_DIR/.env"
+  echo "Demo-Bereich: Auf der Startseite gibt es dann \"Als Leitung\" / \"Als Pflegekraft\" ausprobieren –"
+  echo "ohne Anmeldung, mit eigenen Beispieldaten (getrennt von den echten Daten, jede Nacht frisch)."
+  echo "Darunter bleibt die normale Anmeldung mit Passwort und Zwei-Faktor-Code für die echten Daten."
+  read -r -p "Demo-Bereich anbieten? [J/n] " DB_ANS; DB_ANS="${DB_ANS:-j}"
+  if [[ "$DB_ANS" =~ ^[JjYy] ]]; then DB_ANS=1; else DB_ANS=0; fi
+  printf '\n# Demo-Bereich mit getrennten Beispieldaten unter /demo/ (1 = an, 0 = aus)\nDEMO_BEREICH=%s\n' "$DB_ANS" >> "$DEPLOY_DIR/.env"
+fi
+# Früherer Demo-Modus auf den echten Daten wird durch den getrennten Demo-Bereich ersetzt
+if grep -q '^DEMO_MODUS=1' "$DEPLOY_DIR/.env"; then
+  sed -i 's/^DEMO_MODUS=1/DEMO_MODUS=0/' "$DEPLOY_DIR/.env"
+  gelb "Hinweis: Die Anmeldung ohne Passwort gilt jetzt nur noch im getrennten Demo-Bereich, nicht mehr für die echten Daten."
 fi
 # Sicherungs-Passwort (verschlüsselte Sicherungen) – wird einmalig erzeugt, falls noch nicht vorhanden
 NEW_BACKUP_PW=""
@@ -193,7 +195,7 @@ else
 fi
 cat <<EOF
 
-$(grep -q '^DEMO_MODUS=1' "$DEPLOY_DIR/.env" && echo "DEMO-MODUS IST AN: Startseite zeigt die Rollenauswahl. Ausschalten: in $DEPLOY_DIR/.env DEMO_MODUS=0 setzen und install.sh erneut ausführen.")
+$(grep -q '^DEMO_BEREICH=0' "$DEPLOY_DIR/.env" || echo "Demo-Bereich (Beispieldaten, ohne Anmeldung): ${URL}demo/   – abschalten mit DEMO_BEREICH=0 in $DEPLOY_DIR/.env")
 
 Nächste Schritte:
   1. $URL öffnen und mit Benutzer "manager" anmelden.

@@ -171,4 +171,4 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
-loadBranding().then(boot);
+loadBranding().then(async () => { if (!await demoAutoLogin()) await boot(); });

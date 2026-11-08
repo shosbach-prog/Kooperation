@@ -23,6 +23,8 @@ function createApp(db, opts = {}) {
   // Optional: Betrieb in einem Unterordner, z. B. BASE_PATH=/LWL → https://domain.de/LWL/
   const base = String(opts.basePath ?? process.env.BASE_PATH ?? '').trim().replace(/\/+$/, '').replace(/^(?!\/)(.)/, '/$1');
   const cookiePath = base ? `${base}/` : '/';
+  // eigener Cookie-Name, damit Demo-Bereich (Unterordner) und Echtbetrieb sich nicht in die Quere kommen
+  const COOKIE = opts.cookieName || 'sid';
   const app = express.Router();
   app.use(express.json({ limit: '1mb' }));
   // ---------- Erscheinungsbild (öffentlich, schon vor der Anmeldung sichtbar) ----------
@@ -35,7 +37,8 @@ function createApp(db, opts = {}) {
   const demoMode = opts.demo ?? (process.env.DEMO_MODUS === '1');
   const branding = () => {
     const st = getSettings();
-    return { klinik_name: st.klinik_name, untertitel: st.untertitel, akzentfarbe: st.akzentfarbe, logo: !!logoFile(), logo_version: st.logo_version || 0, demo: demoMode };
+    return { klinik_name: st.klinik_name, untertitel: st.untertitel, akzentfarbe: st.akzentfarbe, logo: !!logoFile(), logo_version: st.logo_version || 0, demo: demoMode,
+      demo_link: opts.demoLink || null, live_link: opts.liveLink || null };
   };
   app.get('/api/branding', (_req, res) => res.json(branding()));
   app.get('/api/branding/logo', (req, res, next) => {
@@ -113,7 +116,7 @@ function createApp(db, opts = {}) {
   const PENDING_MIN = 20;
 
   app.use((req, _res, next) => {
-    const token = parseCookies(req).sid;
+    const token = parseCookies(req)[COOKIE];
     if (token) {
       const row = db.prepare(`SELECT u.*, s.stage AS session_stage FROM sessions s JOIN users u ON u.id = s.user_id
         WHERE s.token = ? AND s.expires > ? AND u.active = 1 AND (u.austritt = '' OR u.austritt >= ?)`).get(token, Date.now(), todayIso());
@@ -184,7 +187,7 @@ function createApp(db, opts = {}) {
     const ttl = stage === 'full' ? SESSION_HOURS * 3600e3 : PENDING_MIN * 60e3;
     db.prepare('DELETE FROM sessions WHERE expires < ?').run(Date.now());
     db.prepare('INSERT INTO sessions (token, user_id, expires, stage) VALUES (?, ?, ?, ?)').run(token, userId, Date.now() + ttl, stage);
-    res.setHeader('Set-Cookie', `sid=${token}; HttpOnly; SameSite=Strict; Path=${cookiePath}; Max-Age=${Math.round(ttl / 1000)}${secureFlag}`);
+    res.setHeader('Set-Cookie', `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=${cookiePath}; Max-Age=${Math.round(ttl / 1000)}${secureFlag}`);
     return token;
   };
   const secureFlag = process.env.COOKIE_SECURE === '1' ? '; Secure' : '';
@@ -309,7 +312,7 @@ function createApp(db, opts = {}) {
 
   app.post('/api/logout', wrap((req, res) => {
     if (req.token) db.prepare('DELETE FROM sessions WHERE token = ?').run(req.token);
-    res.setHeader('Set-Cookie', `sid=; HttpOnly; SameSite=Strict; Path=${cookiePath}; Max-Age=0`);
+    res.setHeader('Set-Cookie', `${COOKIE}=; HttpOnly; SameSite=Strict; Path=${cookiePath}; Max-Age=0`);
     return { ok: true };
   }));
 

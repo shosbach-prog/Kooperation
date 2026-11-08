@@ -48,6 +48,7 @@ function renderLogin() {
   if (pk) main().querySelector('#login-form').after(pk);
   main().querySelector('.login').append(legalLinks());
   if (state.branding?.demo) demoLogin(main().querySelector('.login'));
+  else if (state.branding?.demo_link) demoTeaser(main().querySelector('.login'));
   const form = document.getElementById('login-form');
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
