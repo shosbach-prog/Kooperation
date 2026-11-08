@@ -111,7 +111,7 @@ Die Passwörter bitte **vor jedem echten Einsatz ändern**.
 
 ### Kostenlos online stellen
 
-**netcup-Server (VPS/Root-Server):** Installation mit einem Skript, siehe **[deploy/NETCUP.md](deploy/NETCUP.md)**.
+**Eigener Server (VPS) mit Ubuntu/Debian:** Installation mit einem Skript, siehe **[deploy/IONOS.md](deploy/IONOS.md)** bzw. **[deploy/NETCUP.md](deploy/NETCUP.md)**.
 
 Eine Schritt-für-Schritt-Anleitung für einen kostenlosen Server in Frankfurt (Oracle Cloud Always Free,
 DuckDNS, automatisches HTTPS, tägliche Sicherung) steht in **[deploy/ANLEITUNG.md](deploy/ANLEITUNG.md)**.

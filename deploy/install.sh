@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 #  Personaleinsatzplanung – Einrichtung auf einem frischen Linux-Server
-#  getestet für: Ubuntu 22.04/24.04, Debian 12 (z. B. netcup VPS / Root-Server)
+#  für: Ubuntu 22.04/24.04, Debian 12 (z. B. IONOS VPS, netcup VPS / Root-Server)
 #
 #  Aufruf auf dem Server (als root):
 #    curl -fsSL https://raw.githubusercontent.com/shosbach-prog/kooperation/main/deploy/install.sh -o install.sh
