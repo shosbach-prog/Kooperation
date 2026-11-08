@@ -167,7 +167,23 @@ function sollStunden(year, month, weeklyHours) {
   return days * perDay;
 }
 
+/**
+ * Arbeitstage (Mo–Fr ohne Feiertage und 24./31.12.) im Zeitraum, beide Daten einschließlich.
+ * Grundlage für Urlaubstage und die Anrechnung von Urlaub/Krankheit auf das Zeitkonto.
+ */
+function arbeitstage(from, to) {
+  let days = 0;
+  for (let t = parseDate(from); t <= parseDate(to); t += DAY) {
+    const wd = new Date(t).getUTCDay();
+    const iso = isoDate(t);
+    if (wd === 0 || wd === 6 || holidayName(iso) || isVorfest(iso)) continue;
+    days++;
+  }
+  return days;
+}
+
 module.exports = {
+  arbeitstage,
   DAY, parseDate, isoDate, toMinutes, easterSunday, holidaysNRW, holidayName, isVorfest,
   shiftInterval, shiftHours, breakdown, zuschlagEuro, sollStunden,
 };

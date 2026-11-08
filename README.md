@@ -9,17 +9,23 @@ Arbeitszeit wird angelehnt an den **TVöD (BT-K)** angerechnet.
 - **Dienstzeiten** festlegen (z. B. Früh-, Spät- und Nachtdienst) mit Beginn, Ende und Pause, auch über Mitternacht
 - **Bereiche/Stationen** verwalten
 - **Mindestbesetzung** (und optionale Höchstbesetzung) je Station, Dienst und Wochentag festlegen
+- **Mindestbesetzung nach Qualifikation**, z. B. „in jedem Dienst mindestens 1 Pflegefachkraft“, wahlweise je Station und/oder Dienst
+- **Qualifikationen** frei konfigurierbar (Einstellungen)
 - **Plan erzeugen:** Schichten für einen Zeitraum automatisch aus der Mindestbesetzung anlegen
 - Dienstplan als **Wochenraster**, farbig markiert: unterbesetzt / Minimum erreicht / voll
 - Personen ein- und austragen; Ausnahmen bei Ruhezeit oder Vollbesetzung nur nach Bestätigung
 - Besetzung und Notiz einzelner Schichten ändern
 - **Mitarbeitende** verwalten: Qualifikation, Wochenstunden, **Mindestverfügbarkeit (Std./Monat)**, Stundenentgelt
+- **Abwesenheiten:** Urlaubsanträge genehmigen oder (mit Begründung) ablehnen, Krankmeldungen mit Status der AU-Bescheinigung, Abwesenheiten direkt eintragen (z. B. bei telefonischer Krankmeldung)
+- **Protokoll** aller Ein- und Austragungen mit Begründung sowie aller Abwesenheiten
 - **Auswertung TVöD** je Monat: Soll, Ist, Saldo, Nacht-, Sonntags-, Feiertags- und Vorfeststunden, Zuschläge in Euro, Liste der unterbesetzten Schichten, **CSV-Export** für Excel
 - **Einstellungen:** Zuschlagssätze, Nachtzeitraum, Ruhezeit, Austragsfrist
 
 **Mitarbeitende**
-- Melden sich **selbst für Dienste an** und tragen sich **selbst wieder aus**
-- Austragen ist nur bis zur eingestellten Frist möglich (Standard: 72 Std. vor Dienstbeginn) und nur, wenn die Mindestbesetzung nicht unterschritten wird
+- Melden sich **selbst für Dienste an** und tragen sich **selbst wieder aus**, jeweils **mit Begründung** (Pflicht beim Austragen, beim Eintragen einstellbar)
+- Austragen ist nur bis zur eingestellten Frist möglich (Standard: 72 Std. vor Dienstbeginn) und nur, wenn weder die Mindestbesetzung noch die Qualifikationsregeln verletzt werden
+- **Urlaub beantragen** mit Urlaubskonto (Anspruch, genehmigt, beantragt, Rest); offene Anträge können zurückgezogen werden
+- **Krank melden** und Krankmeldung verlängern; ab dem eingestellten Krankheitstag (Standard: 4. Tag, EFZG § 5) wird die **AU-Bescheinigung hochgeladen** (PDF, JPG oder PNG, max. 10 MB, auch als Handyfoto)
 - **Meine Dienste:** Übersicht der kommenden Dienste
 - **Stundenkonto:** Soll/Ist, Fortschritt zur Mindestverfügbarkeit, Zuschläge
 
@@ -37,6 +43,8 @@ Arbeitszeit wird angelehnt an den **TVöD (BT-K)** angerechnet.
 - Keine Überschneidung von Diensten
 - Mindestruhezeit zwischen zwei Diensten (Standard 11 Std., § 5 ArbZG)
 - Höchstbesetzung je Schicht
+- Kein Eintragen bei Urlaub (beantragt oder genehmigt) oder Krankheit
+- Bei Krankmeldung und genehmigtem Urlaub werden bestehende Dienste im Zeitraum automatisch ausgetragen (mit Protokolleintrag)
 
 ## Berechnung nach TVöD
 
@@ -51,6 +59,8 @@ Arbeitszeit wird angelehnt an den **TVöD (BT-K)** angerechnet.
 | Samstag 13–21 Uhr | 20 %, im Schichtdienst standardmäßig **aus** |
 | Zusammentreffen (§ 8 Abs. 1 S. 3) | Bei Feiertag, Vorfesttag, Sonntag und Samstag zählt nur der höchste Zuschlag; der Nachtzuschlag kommt zusätzlich hinzu |
 | Feiertage | gesetzliche Feiertage NRW, automatisch berechnet |
+| Urlaub / Krankheit (§ 6 Abs. 3, §§ 21, 22, 26) | je Arbeitstag 1/5 der Wochenarbeitszeit angerechnet (vereinfacht) |
+| Urlaubsanspruch (§ 26) | 30 Arbeitstage bei 5-Tage-Woche (je Person einstellbar) |
 | Euro-Betrag | Stunden × Prozentsatz × hinterlegtes Stundenentgelt (Stufe 3 der Entgeltgruppe) |
 
 Die Pause wird nicht als Arbeitszeit angerechnet und anteilig von den
@@ -87,6 +97,7 @@ Die Passwörter bitte **vor jedem echten Einsatz ändern**.
 
 - Die Anwendung **nur über HTTPS** bereitstellen, z. B. hinter dem vorhandenen Reverse-Proxy, und dann `COOKIE_SECURE=1` setzen.
 - Die Uhrzeit des Servers muss stimmen (NTP), sonst werden die 2FA-Codes abgelehnt.
+- Die AU-Bescheinigungen sind **Gesundheitsdaten** (Art. 9 DSGVO). Sie liegen außerhalb des Web-Verzeichnisses, und nur die betroffene Person und die Einsatzplanung können sie abrufen. Legen Sie Löschfristen fest.
 - Die Datenbankdatei (`data/`) enthält Personaldaten. Sie gehört in die Datensicherung und muss vor fremdem Zugriff geschützt werden.
 - Vor dem Echtbetrieb Datenschutzbeauftragte/n und Personalrat einbinden (Dienstplanung ist mitbestimmungspflichtig).
 
@@ -97,6 +108,7 @@ Die Passwörter bitte **vor jedem echten Einsatz ändern**.
 | `PORT` | HTTP-Port | `3000` |
 | `DB_FILE` | Pfad der SQLite-Datenbank | `data/personaleinsatz.db` |
 | `MANAGER_PASSWORD` | Startpasswort des Managers bei der ersten Einrichtung | `manager123` |
+| `UPLOAD_DIR` | Ablage der hochgeladenen AU-Bescheinigungen | `data/uploads` |
 | `COOKIE_SECURE` | `1` = Anmelde-Cookie nur über HTTPS senden (im Echtbetrieb setzen) | `0` |
 | `SEED_DEMO` | `0` = ohne Demo-Stationen, Demo-Dienste und Demo-Personal starten | `1` |
 
@@ -128,8 +140,9 @@ test/              Tests (node:test)
 
 ## Mögliche nächste Schritte
 
-- Mindestbesetzung je **Qualifikation** (z. B. mindestens 1 Pflegefachkraft im Nachtdienst)
-- Urlaub, Krankheit und Abwesenheiten mit Anrechnung auf das Soll
+- Qualifikationen, die auch andere vertreten dürfen (z. B. Pflegefachkraft zählt als Pflegehilfe)
+- Automatische Löschung von AU-Bescheinigungen nach Ablauf einer Frist
+- Weitere Abwesenheitsarten (Fortbildung, Sonderurlaub, Kind krank)
 - Wunschdienste und Tauschbörse unter Kolleginnen und Kollegen
 - Benachrichtigung per E-Mail bei offenen Schichten
 - Wechselschicht- und Schichtzulage (§ 8 Abs. 5/6), Bereitschaftsdienst, Rufbereitschaft

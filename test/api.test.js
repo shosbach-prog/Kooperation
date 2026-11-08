@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { openDb } = require('../src/db');
 const { createApp } = require('../src/app');
 const TOTP = require('../src/totp');
+const T = require('../src/tvoed');
 
 const secrets = new Map(); // Benutzer → TOTP-Geheimnis
 const recovery = new Map(); // Benutzer → Wiederherstellungscodes
@@ -29,7 +30,8 @@ let server, base;
 
 test.before(async () => {
   const db = openDb(':memory:');
-  server = createApp(db).listen(0);
+  const uploadDir = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'pep-uploads-'));
+  server = createApp(db, { uploadDir }).listen(0);
   await new Promise((r) => server.once('listening', r));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -37,7 +39,7 @@ test.after(() => server.close());
 
 function client() {
   let cookie = '';
-  return async (method, url, body) => {
+  const c = async (method, url, body) => {
     const res = await fetch(base + url, {
       method,
       headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(cookie ? { Cookie: cookie } : {}) },
@@ -48,6 +50,8 @@ function client() {
     const data = (res.headers.get('content-type') || '').includes('json') ? await res.json() : await res.text();
     return { status: res.status, data };
   };
+  c.cookie = () => cookie;
+  return c;
 }
 
 const future = (days) => {
@@ -110,13 +114,26 @@ test('Ablauf: Plan erzeugen, eintragen, Regeln, Auswertung', async () => {
 
   // Austragen unter Mindestbesetzung ist gesperrt (Minimum 2–3, nur 1 eingetragen)
   r = await anna('DELETE', `/api/shifts/${früh.id}/assign`);
+  assert.equal(r.data.code, 'BEGRUENDUNG'); // Begründung ist Pflicht
+  r = await anna('DELETE', `/api/shifts/${früh.id}/assign`, { reason: 'Arzttermin' });
   assert.equal(r.status, 400);
   assert.equal(r.data.code, 'MINIMUM');
 
   // Wenn Minimum auf 0 gesetzt wird, darf sie sich austragen
   await mgr('PUT', `/api/shifts/${früh.id}`, { min_staff: 0, max_staff: 1 });
-  r = await anna('DELETE', `/api/shifts/${früh.id}/assign`);
+  // Mindestbesetzung nach Qualifikation: Anna ist die einzige Pflegefachkraft
+  assert.equal(früh.qual_missing.length, 1);
+  r = await anna('DELETE', `/api/shifts/${früh.id}/assign`, { reason: 'Arzttermin' });
+  assert.equal(r.data.code, 'QUALIFIKATION');
+  const rules = (await mgr('GET', '/api/qual-rules')).data;
+  await mgr('DELETE', `/api/qual-rules/${rules[0].id}`);
+  r = await anna('DELETE', `/api/shifts/${früh.id}/assign`, { reason: 'Arzttermin' });
   assert.equal(r.status, 200);
+  // Begründung steht im Protokoll
+  const log = (await mgr('GET', '/api/log')).data;
+  assert.equal(log[0].action, 'assignment.remove');
+  assert.equal(log[0].reason, 'Arzttermin');
+  assert.equal(log[0].person, 'Anna Becker');
 
   // Maximalbesetzung
   await anna('POST', `/api/shifts/${früh.id}/assign`);
@@ -216,4 +233,116 @@ test('Zwei-Faktor-Anmeldung: Pflicht, falscher Code, Sperre, Zurücksetzen', asy
   const anna = client();
   await login(anna, 'abecker', 'demo123');
   assert.equal((await anna('POST', '/api/2fa/disable', { code: '123456' })).status, 400);
+});
+
+test('Urlaub beantragen, genehmigen, Urlaubskonto und Anrechnung', async () => {
+  const mgr = client();
+  const tobias = client();
+  await login(mgr, 'manager', 'manager123');
+  await login(tobias, 'twagner', 'demo123');
+
+  // Mo–Fr in 5 Wochen: 5 Arbeitstage (sofern kein Feiertag)
+  const d = new Date(Date.now() + 35 * 86400000);
+  const monday = new Date(d.getTime() - ((d.getUTCDay() + 6) % 7) * 86400000).toISOString().slice(0, 10);
+  const friday = new Date(Date.parse(monday) + 4 * 86400000).toISOString().slice(0, 10);
+  await mgr('POST', '/api/shifts/generate', { from: monday, to: friday });
+  const plan = (await tobias('GET', `/api/plan?from=${monday}&to=${friday}`)).data.shifts;
+  const tueSpät = plan.find((s) => s.type_code === 'S' && s.date > monday);
+  assert.equal((await tobias('POST', `/api/shifts/${tueSpät.id}/assign`)).status, 200);
+
+  let r = await tobias('POST', '/api/absences', { type: 'urlaub', from: monday, to: friday, note: 'Familienurlaub' });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.status, 'beantragt');
+  assert.equal(r.data.konflikte, 1);
+  const id = r.data.id;
+  // überschneidender Antrag nicht möglich
+  assert.equal((await tobias('POST', '/api/absences', { type: 'urlaub', from: friday, to: friday })).status, 409);
+  // während beantragtem Urlaub kein Eintragen
+  const wedFrüh = plan.find((s) => s.type_code === 'F' && s.date === new Date(Date.parse(monday) + 2 * 86400000).toISOString().slice(0, 10));
+  assert.equal((await tobias('POST', `/api/shifts/${wedFrüh.id}/assign`)).data.code, 'ABWESEND');
+
+  r = await tobias('GET', '/api/absences');
+  const tage = T.arbeitstage(monday, friday);
+  assert.equal(r.data.urlaub.beantragt, tage);
+  assert.equal(r.data.urlaub.rest, 30 - tage);
+
+  // Mitarbeitende dürfen nicht selbst genehmigen
+  assert.equal((await tobias('PUT', `/api/absences/${id}/decision`, { status: 'genehmigt' })).status, 403);
+  // Ablehnung braucht Begründung
+  assert.equal((await mgr('PUT', `/api/absences/${id}/decision`, { status: 'abgelehnt' })).data.code, 'BEGRUENDUNG');
+  r = await mgr('PUT', `/api/absences/${id}/decision`, { status: 'genehmigt' });
+  assert.equal(r.data.status, 'genehmigt');
+  assert.equal(r.data.removed, 1); // Spätdienst wurde automatisch ausgetragen
+  assert.equal((await tobias('GET', '/api/my-shifts')).data.length, 0);
+  // genehmigter Urlaub kann nicht mehr selbst zurückgezogen werden
+  assert.equal((await tobias('DELETE', `/api/absences/${id}`)).status, 403);
+
+  r = await tobias('GET', `/api/report?month=${monday.slice(0, 7)}`);
+  const row = r.data.rows[0];
+  const tageImMonat = T.arbeitstage(monday, friday.slice(0, 7) === monday.slice(0, 7) ? friday : `${monday.slice(0, 7)}-31`);
+  assert.equal(row.urlaub_tage, tageImMonat);
+  assert.ok(Math.abs(row.urlaub_std - tageImMonat * 7.7) < 0.01);
+});
+
+test('Krankmeldung mit AU-Bescheinigung ab Tag x', async () => {
+  const mgr = client();
+  const lena = client();
+  const other = client();
+  await login(mgr, 'manager', 'manager123');
+  await login(lena, 'lhoffmann', 'demo123');
+  await login(other, 'myilmaz', 'demo123');
+  const today = new Date().toISOString().slice(0, 10);
+  const plus = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+
+  // 2 Tage krank: keine AU nötig (Standard ab Tag 4)
+  let r = await lena('POST', '/api/absences', { type: 'krank', from: today, to: plus(1) });
+  assert.equal(r.data.status, 'gemeldet');
+  assert.equal(r.data.au_erforderlich, false);
+  const id = r.data.id;
+
+  // Verlängerung auf 5 Tage → AU erforderlich und fehlt
+  r = await lena('PUT', `/api/absences/${id}`, { to: plus(4) });
+  assert.equal(r.data.au_erforderlich, true);
+  assert.equal(r.data.au_fehlt, true);
+  assert.equal(r.data.au_faellig_ab, plus(3));
+
+  // Ungültige Datei wird abgelehnt
+  const upload = (c, body, name) => fetch(`${base}/api/absences/${id}/attachments`, {
+    method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-Filename': encodeURIComponent(name), Cookie: c.cookie() }, body,
+  });
+  let res = await upload(lena, Buffer.from('<script>alert(1)</script>'), 'x.html');
+  assert.equal(res.status, 400);
+  const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
+  res = await upload(lena, pdf, 'AU Bescheinigung.pdf');
+  assert.equal(res.status, 200);
+  const att = (await res.json());
+  assert.equal(att.au_fehlt, false);
+  assert.equal(att.attachments[0].filename, 'AU Bescheinigung.pdf');
+
+  // Kolleg/innen dürfen die Bescheinigung nicht sehen, Manager schon
+  const fileId = att.attachments[0].id;
+  assert.equal((await other('GET', `/api/attachments/${fileId}`)).status, 404);
+  assert.equal((await other('GET', '/api/absences')).data.absences.length, 0);
+  r = await mgr('GET', `/api/attachments/${fileId}`);
+  assert.equal(r.status, 200);
+  assert.match(r.data, /^%PDF/);
+
+  // Einstellbar: AU schon ab Tag 1
+  await mgr('PUT', '/api/settings', { au_ab_tag: 1 });
+  r = await lena('POST', '/api/absences', { type: 'krank', from: plus(20), to: plus(20) });
+  assert.equal(r.data.au_erforderlich, true);
+  await mgr('PUT', '/api/settings', { au_ab_tag: 4 });
+
+  // Krankmeldung kann von Mitarbeitenden nicht gelöscht werden
+  assert.equal((await lena('DELETE', `/api/absences/${id}`)).status, 403);
+});
+
+test('Einstellungen: Qualifikationsliste und Begründungspflicht', async () => {
+  const mgr = client();
+  await login(mgr, 'manager', 'manager123');
+  const r = await mgr('PUT', '/api/settings', { qualifikationen: ['Pflegefachkraft', ' MFA ', '', 'MFA'], begruendung_eintragen: true });
+  assert.deepEqual(r.data.qualifikationen, ['Pflegefachkraft', 'MFA']);
+  assert.equal(r.data.begruendung_eintragen, true);
+  assert.equal((await mgr('PUT', '/api/settings', { qualifikationen: 'x' })).status, 400);
+  await mgr('PUT', '/api/settings', { begruendung_eintragen: false });
 });

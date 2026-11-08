@@ -19,6 +19,11 @@ const DEFAULT_SETTINGS = {
   zuschlag_vorfest: 35,
   zuschlag_samstag: 20,
   samstag_bei_schichtarbeit: false,
+  qualifikationen: ['Pflegefachkraft', 'Pflegehilfskraft', 'Auszubildende/r', 'Stationsleitung', 'Arzt/Ärztin', 'Psychologe/Psychologin', 'Therapeut/in'],
+  begruendung_eintragen: false,
+  begruendung_austragen: true,
+  urlaubstage_standard: 30,
+  au_ab_tag: 4,
 };
 
 function hashPassword(pw) {
@@ -55,7 +60,8 @@ CREATE TABLE IF NOT EXISTS users (
   totp_last_counter INTEGER NOT NULL DEFAULT -1,
   recovery_codes TEXT NOT NULL DEFAULT '[]',
   failed_logins INTEGER NOT NULL DEFAULT 0,
-  locked_until INTEGER NOT NULL DEFAULT 0
+  locked_until INTEGER NOT NULL DEFAULT 0,
+  urlaubstage_jahr REAL NOT NULL DEFAULT 30
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -113,6 +119,40 @@ CREATE TABLE IF NOT EXISTS assignments (
   PRIMARY KEY (shift_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS qual_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  unit_id INTEGER REFERENCES units(id) ON DELETE CASCADE,
+  shift_type_id INTEGER REFERENCES shift_types(id) ON DELETE CASCADE,
+  qualification TEXT NOT NULL,
+  min_count INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS absences (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK (type IN ('urlaub','krank')),
+  from_date TEXT NOT NULL,
+  to_date TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('beantragt','genehmigt','abgelehnt','gemeldet')),
+  note TEXT DEFAULT '',
+  decision_note TEXT DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_by INTEGER,
+  decided_by INTEGER,
+  decided_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS attachments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  absence_id INTEGER NOT NULL REFERENCES absences(id) ON DELETE CASCADE,
+  filename TEXT NOT NULL,
+  stored_name TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
+  uploaded_by INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -154,6 +194,8 @@ function seed(db, withDemo) {
     }
   }
 
+  db.prepare('INSERT INTO qual_rules (unit_id, shift_type_id, qualification, min_count) VALUES (NULL, NULL, ?, 1)').run('Pflegefachkraft');
+
   const demo = [
     ['Anna Becker', 'abecker', 'Pflegefachkraft', 38.5, 120],
     ['Murat Yilmaz', 'myilmaz', 'Pflegefachkraft', 38.5, 120],
@@ -182,6 +224,7 @@ function migrate(db) {
   add('users', 'failed_logins INTEGER NOT NULL DEFAULT 0');
   add('users', 'locked_until INTEGER NOT NULL DEFAULT 0');
   add('sessions', "stage TEXT NOT NULL DEFAULT 'full'");
+  add('users', 'urlaubstage_jahr REAL NOT NULL DEFAULT 30');
   // Name der Einrichtung aus der ersten Prototyp-Version korrigieren
   db.prepare("UPDATE settings SET value = ? WHERE key = 'klinik_name' AND value = ?")
     .run(JSON.stringify('LWL-Klinik Dortmund'), JSON.stringify('KWL Klinik Dortmund'));

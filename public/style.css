@@ -111,6 +111,13 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 label.check { display: flex; gap: .5rem; align-items: flex-start; }
 td.actions { display: flex; gap: .25rem; flex-wrap: wrap; }
 .login details { margin: .5rem 0; }
+#tabs button .tab-badge { display: inline-block; margin-left: .35em; min-width: 1.4em; padding: 0 .35em; border-radius: 999px; background: var(--bad); color: #fff; font-size: .75rem; font-weight: 700; }
+.cell .missing { font-size: .75rem; color: var(--bad); font-weight: 600; }
+.absent-info { color: var(--warn); font-weight: 600; text-transform: none; letter-spacing: 0; }
+ul.files { list-style: none; padding: 0; margin: .25rem 0 0; font-size: .85rem; }
+ul.files li { display: flex; gap: .25rem; align-items: center; }
+.warn-card { border-left: 4px solid var(--bad); }
+textarea { width: 100%; font: inherit; }
 #toast { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: .6rem 1rem; border-radius: var(--radius); opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; z-index: 20; }
 #toast.show { opacity: 1; }
 #toast.err { background: var(--bad); color: #fff; }

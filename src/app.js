@@ -1,4 +1,5 @@
 'use strict';
+const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
@@ -17,7 +18,8 @@ class HttpError extends Error {
   }
 }
 
-function createApp(db) {
+function createApp(db, opts = {}) {
+  const uploadDir = opts.uploadDir || path.join(process.cwd(), 'data', 'uploads');
   const app = express();
   app.use(express.json({ limit: '1mb' }));
   app.use(express.static(path.join(__dirname, '..', 'public')));
@@ -86,7 +88,7 @@ function createApp(db) {
   const publicUser = (u) => ({
     id: u.id, name: u.name, username: u.username, role: u.role, qualification: u.qualification,
     weekly_hours: u.weekly_hours, min_hours_month: u.min_hours_month, stundenentgelt: u.stundenentgelt, active: !!u.active,
-    totp_enabled: !!u.totp_enabled, locked: u.locked_until > Date.now(), recovery_left: JSON.parse(u.recovery_codes || '[]').length,
+    urlaubstage_jahr: u.urlaubstage_jahr, totp_enabled: !!u.totp_enabled, locked: u.locked_until > Date.now(), recovery_left: JSON.parse(u.recovery_codes || '[]').length,
   });
 
   const startSession = (res, userId, stage) => {
@@ -239,7 +241,11 @@ function createApp(db) {
       let v = req.body[k];
       if (typeof def === 'number') { v = Number(v); if (!Number.isFinite(v) || v < 0) throw new HttpError(400, `Ungültiger Wert für ${k}.`); }
       if (typeof def === 'boolean') v = !!v;
-      if (typeof def === 'string') { v = String(v); if (k.startsWith('nacht_') && !isTime(v)) throw new HttpError(400, `Ungültige Uhrzeit für ${k}.`); }
+      if (Array.isArray(def)) {
+        if (!Array.isArray(v)) throw new HttpError(400, `Ungültige Liste für ${k}.`);
+        v = [...new Set(v.map((x) => String(x).trim()).filter(Boolean))].slice(0, 100);
+      }
+      if (typeof def === 'string' && !Array.isArray(def)) { v = String(v); if (k.startsWith('nacht_') && !isTime(v)) throw new HttpError(400, `Ungültige Uhrzeit für ${k}.`); }
       upd.run(k, JSON.stringify(v));
     }
     audit(req.user.id, 'settings.update', req.body);
@@ -259,7 +265,7 @@ function createApp(db) {
     }
     if ('role' in b || !partial) { out.role = b.role === 'manager' ? 'manager' : 'staff'; }
     for (const k of ['qualification']) if (k in b) out[k] = String(b[k] || '');
-    for (const k of ['weekly_hours', 'min_hours_month', 'stundenentgelt']) {
+    for (const k of ['weekly_hours', 'min_hours_month', 'stundenentgelt', 'urlaubstage_jahr']) {
       if (k in b) { const v = Number(b[k]); if (!Number.isFinite(v) || v < 0) throw new HttpError(400, `Ungültiger Wert: ${k}`); out[k] = v; }
     }
     if ('active' in b) out.active = b.active ? 1 : 0;
@@ -271,9 +277,10 @@ function createApp(db) {
     const pw = req.body.password;
     if (!pw || String(pw).length < 6) throw new HttpError(400, 'Startpasswort: mind. 6 Zeichen.');
     if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(f.username)) throw new HttpError(409, 'Benutzername ist bereits vergeben.');
-    const id = db.prepare(`INSERT INTO users (name, username, password_hash, role, qualification, weekly_hours, min_hours_month, stundenentgelt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(f.name, f.username, hashPassword(pw), f.role, f.qualification || '',
-      f.weekly_hours ?? getSettings().wochenstunden_standard, f.min_hours_month ?? 0, f.stundenentgelt ?? 0).lastInsertRowid;
+    const id = db.prepare(`INSERT INTO users (name, username, password_hash, role, qualification, weekly_hours, min_hours_month, stundenentgelt, urlaubstage_jahr)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(f.name, f.username, hashPassword(pw), f.role, f.qualification || '',
+      f.weekly_hours ?? getSettings().wochenstunden_standard, f.min_hours_month ?? 0, f.stundenentgelt ?? 0,
+      f.urlaubstage_jahr ?? getSettings().urlaubstage_standard).lastInsertRowid;
     audit(req.user.id, 'user.create', { id, username: f.username });
     return publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id));
   }));
@@ -415,6 +422,40 @@ function createApp(db) {
     return { created };
   }));
 
+  // ---------- Mindestbesetzung nach Qualifikation ----------
+  const loadRules = () => db.prepare(`SELECT r.*, u.name AS unit_name, st.name AS type_name FROM qual_rules r
+    LEFT JOIN units u ON u.id = r.unit_id LEFT JOIN shift_types st ON st.id = r.shift_type_id ORDER BY r.qualification`).all();
+
+  /** Fehlende Qualifikationen einer Schicht; optional ohne eine bestimmte Person (für Austragen) */
+  const qualMissing = (shift, assigned, rules, withoutUserId = null) => {
+    const people = assigned.filter((a) => a.user_id !== withoutUserId);
+    return rules
+      .filter((r) => (r.unit_id === null || r.unit_id === shift.unit_id) && (r.shift_type_id === null || r.shift_type_id === shift.shift_type_id))
+      .map((r) => ({ qualification: r.qualification, need: r.min_count, have: people.filter((p) => p.qualification === r.qualification).length }))
+      .filter((x) => x.have < x.need);
+  };
+
+  app.get('/api/qual-rules', auth, manager, wrap(() => loadRules()));
+  app.post('/api/qual-rules', auth, manager, wrap((req) => {
+    const b = req.body || {};
+    const qualification = String(b.qualification || '').trim();
+    const min = Number(b.min_count);
+    if (!qualification) throw new HttpError(400, 'Qualifikation fehlt.');
+    if (!Number.isInteger(min) || min < 1) throw new HttpError(400, 'Anzahl muss mindestens 1 sein.');
+    const unitId = b.unit_id ? Number(b.unit_id) : null;
+    const typeId = b.shift_type_id ? Number(b.shift_type_id) : null;
+    const id = db.prepare('INSERT INTO qual_rules (unit_id, shift_type_id, qualification, min_count) VALUES (?, ?, ?, ?)')
+      .run(unitId, typeId, qualification, min).lastInsertRowid;
+    audit(req.user.id, 'qual_rule.create', { id, unitId, typeId, qualification, min });
+    return loadRules();
+  }));
+  app.delete('/api/qual-rules/:id', auth, manager, wrap((req) => {
+    db.prepare('DELETE FROM qual_rules WHERE id = ?').run(Number(req.params.id));
+    audit(req.user.id, 'qual_rule.delete', { id: Number(req.params.id) });
+    return loadRules();
+  }));
+
+  // ---------- Dienstplan ----------
   const loadShifts = (where, params) => {
     const shifts = db.prepare(`SELECT s.*, st.name AS type_name, st.code AS type_code, st.color AS type_color, u.name AS unit_name
       FROM shifts s JOIN shift_types st ON st.id = s.shift_type_id JOIN units u ON u.id = s.unit_id
@@ -425,8 +466,16 @@ function createApp(db) {
       JOIN users us ON us.id = a.user_id WHERE a.shift_id IN (${ids.map(() => '?').join(',')}) ORDER BY us.name`).all(...ids);
     const byShift = new Map(ids.map((id) => [id, []]));
     for (const a of assigned) byShift.get(a.shift_id).push({ user_id: a.user_id, name: a.name, qualification: a.qualification });
-    return shifts.map((s) => ({ ...s, hours: T.shiftHours(s), holiday: T.holidayName(s.date), assigned: byShift.get(s.id) }));
+    const rules = loadRules();
+    return shifts.map((s) => {
+      const list = byShift.get(s.id);
+      return { ...s, hours: T.shiftHours(s), holiday: T.holidayName(s.date), assigned: list, qual_missing: qualMissing(s, list, rules) };
+    });
   };
+
+  /** Abwesenheiten (Urlaub beantragt/genehmigt, Krankheit), die ein Datum abdecken */
+  const absenceOn = (userId, date) => db.prepare(`SELECT * FROM absences WHERE user_id = ? AND ? BETWEEN from_date AND to_date
+    AND status IN ('beantragt','genehmigt','gemeldet') LIMIT 1`).get(userId, date);
 
   app.get('/api/plan', auth, wrap((req) => {
     const { from, to } = req.query;
@@ -436,7 +485,11 @@ function createApp(db) {
       const h = T.holidayName(T.isoDate(t));
       if (h) holidays[T.isoDate(t)] = h;
     }
-    return { shifts: loadShifts('s.date BETWEEN ? AND ?', [from, to]), holidays };
+    const isMgr = req.user.role === 'manager';
+    const absences = db.prepare(`SELECT a.id, a.user_id, a.type, a.from_date, a.to_date, a.status, u.name FROM absences a
+      JOIN users u ON u.id = a.user_id WHERE a.status IN ('beantragt','genehmigt','gemeldet') AND a.from_date <= ? AND a.to_date >= ?
+      ${isMgr ? '' : 'AND a.user_id = ?'}`).all(...(isMgr ? [to, from] : [to, from, req.user.id]));
+    return { shifts: loadShifts('s.date BETWEEN ? AND ?', [from, to]), holidays, absences };
   }));
 
   app.get('/api/my-shifts', auth, wrap((req) => {
@@ -489,6 +542,12 @@ function createApp(db) {
     return null;
   };
 
+  const readReason = (req, required) => {
+    const reason = String(req.body?.reason || '').trim().slice(0, 500);
+    if (required && reason.length < 3) throw new HttpError(400, 'Bitte geben Sie eine Begründung an.', 'BEGRUENDUNG');
+    return reason;
+  };
+
   app.post('/api/shifts/:id/assign', auth, wrap((req) => {
     const settings = getSettings();
     const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(Number(req.params.id));
@@ -498,10 +557,16 @@ function createApp(db) {
     const target = db.prepare('SELECT * FROM users WHERE id = ? AND active = 1').get(userId);
     if (!target) throw new HttpError(404, 'Mitarbeiter/in nicht gefunden.');
     if (db.prepare('SELECT 1 FROM assignments WHERE shift_id = ? AND user_id = ?').get(shift.id, userId)) throw new HttpError(409, 'Bereits eingetragen.');
+    const reason = readReason(req, !isMgr && settings.begruendung_eintragen);
 
     const force = isMgr && !!req.body?.force;
     if (!isMgr && T.shiftInterval(shift.date, shift.start_time, shift.end_time).start <= nowLocalMs()) {
       throw new HttpError(400, 'Diese Schicht hat bereits begonnen.');
+    }
+    const abs = absenceOn(userId, shift.date);
+    if (abs) {
+      const what = abs.type === 'krank' ? 'krankgemeldet' : abs.status === 'beantragt' ? 'mit beantragtem Urlaub eingetragen' : 'im Urlaub';
+      throw new HttpError(409, `${isMgr ? target.name + ' ist' : 'Sie sind'} an diesem Tag ${what}.`, 'ABWESEND');
     }
     const count = db.prepare('SELECT COUNT(*) AS n FROM assignments WHERE shift_id = ?').get(shift.id).n;
     if (shift.max_staff !== null && count >= shift.max_staff && !force) {
@@ -511,7 +576,7 @@ function createApp(db) {
     if (conflict && (conflict.code === 'UEBERSCHNEIDUNG' || !force)) throw new HttpError(409, conflict.message, conflict.code);
 
     db.prepare('INSERT INTO assignments (shift_id, user_id, created_by) VALUES (?, ?, ?)').run(shift.id, userId, req.user.id);
-    audit(req.user.id, 'assignment.add', { shift_id: shift.id, user_id: userId, force });
+    audit(req.user.id, 'assignment.add', { shift_id: shift.id, user_id: userId, force, reason });
     return loadShifts('s.id = ?', [shift.id])[0];
   }));
 
@@ -522,6 +587,7 @@ function createApp(db) {
     const isMgr = req.user.role === 'manager';
     const userId = isMgr && req.query.user_id ? Number(req.query.user_id) : req.user.id;
     if (!db.prepare('SELECT 1 FROM assignments WHERE shift_id = ? AND user_id = ?').get(shift.id, userId)) throw new HttpError(404, 'Nicht eingetragen.');
+    const reason = readReason(req, !isMgr && settings.begruendung_austragen);
 
     if (!isMgr) {
       const start = T.shiftInterval(shift.date, shift.start_time, shift.end_time).start;
@@ -529,14 +595,249 @@ function createApp(db) {
       if (hoursLeft < Number(settings.austrag_frist_std)) {
         throw new HttpError(400, `Austragen ist nur bis ${settings.austrag_frist_std} Std. vor Dienstbeginn möglich. Bitte wenden Sie sich an die Einsatzplanung.`, 'FRIST');
       }
-      const count = db.prepare('SELECT COUNT(*) AS n FROM assignments WHERE shift_id = ?').get(shift.id).n;
-      if (!settings.austrag_unter_minimum && count - 1 < shift.min_staff) {
-        throw new HttpError(400, `Austragen nicht möglich: Die Mindestbesetzung (${shift.min_staff}) würde unterschritten. Bitte Ersatz finden oder die Einsatzplanung kontaktieren.`, 'MINIMUM');
+      if (!settings.austrag_unter_minimum) {
+        const current = loadShifts('s.id = ?', [shift.id])[0];
+        if (current.assigned.length - 1 < shift.min_staff) {
+          throw new HttpError(400, `Austragen nicht möglich: Die Mindestbesetzung (${shift.min_staff}) würde unterschritten. Bitte Ersatz finden oder die Einsatzplanung kontaktieren.`, 'MINIMUM');
+        }
+        const before = current.qual_missing.length;
+        const after = qualMissing(shift, current.assigned, loadRules(), userId);
+        if (after.length > before) {
+          throw new HttpError(400, `Austragen nicht möglich: Es wird mindestens ${after[0].need}× ${after[0].qualification} benötigt. Bitte Ersatz finden oder die Einsatzplanung kontaktieren.`, 'QUALIFIKATION');
+        }
       }
     }
     db.prepare('DELETE FROM assignments WHERE shift_id = ? AND user_id = ?').run(shift.id, userId);
-    audit(req.user.id, 'assignment.remove', { shift_id: shift.id, user_id: userId });
+    audit(req.user.id, 'assignment.remove', { shift_id: shift.id, user_id: userId, reason });
     return loadShifts('s.id = ?', [shift.id])[0];
+  }));
+
+  /** Protokoll der Ein- und Austragungen mit Begründung */
+  app.get('/api/log', auth, manager, wrap((req) => {
+    const limit = Math.min(Number(req.query.limit) || 200, 1000);
+    const rows = db.prepare(`SELECT * FROM audit_log WHERE action IN ('assignment.add','assignment.remove','absence.create','absence.decide',
+      'absence.update','absence.delete','attachment.upload') ORDER BY id DESC LIMIT ?`).all(limit);
+    const userName = new Map(db.prepare('SELECT id, name FROM users').all().map((u) => [u.id, u.name]));
+    const shiftInfo = db.prepare(`SELECT s.date, st.code, u.name AS unit_name FROM shifts s JOIN shift_types st ON st.id = s.shift_type_id
+      JOIN units u ON u.id = s.unit_id WHERE s.id = ?`);
+    return rows.map((r) => {
+      const d = JSON.parse(r.details || '{}');
+      const shift = d.shift_id ? shiftInfo.get(d.shift_id) : null;
+      return {
+        id: r.id, at: r.at, action: r.action, actor: userName.get(r.actor_id) || '–',
+        person: userName.get(d.user_id) || null, shift, reason: d.reason || d.note || '', details: d,
+      };
+    });
+  }));
+
+  // ---------- Urlaub und Krankheit ----------
+  const absenceDays = (a) => (T.parseDate(a.to_date) - T.parseDate(a.from_date)) / T.DAY + 1;
+  const auRequired = (a, settings) => a.type === 'krank' && absenceDays(a) >= Number(settings.au_ab_tag || 1);
+
+  const decorateAbsence = (a, settings) => {
+    const atts = db.prepare('SELECT id, filename, mime, size, uploaded_at FROM attachments WHERE absence_id = ? ORDER BY id').all(a.id);
+    const conflicts = db.prepare(`SELECT COUNT(*) AS n FROM assignments x JOIN shifts s ON s.id = x.shift_id
+      WHERE x.user_id = ? AND s.date BETWEEN ? AND ?`).get(a.user_id, a.from_date, a.to_date).n;
+    const required = auRequired(a, settings);
+    const today = T.isoDate(nowLocalMs());
+    // fällig ab dem x-ten Krankheitstag
+    const dueDate = T.isoDate(T.parseDate(a.from_date) + (Number(settings.au_ab_tag || 1) - 1) * T.DAY);
+    return {
+      ...a, kalendertage: absenceDays(a), arbeitstage: T.arbeitstage(a.from_date, a.to_date), attachments: atts,
+      au_erforderlich: required, au_faellig_ab: required ? dueDate : null,
+      au_fehlt: required && atts.length === 0, au_ueberfaellig: required && atts.length === 0 && today >= dueDate,
+      konflikte: conflicts,
+    };
+  };
+
+  /** Trägt eine Person aus allen Diensten im Zeitraum aus (bei Krankheit / genehmigtem Urlaub) */
+  const removeAssignmentsInRange = (userId, from, to, actorId, reason) => {
+    const rows = db.prepare(`SELECT x.shift_id FROM assignments x JOIN shifts s ON s.id = x.shift_id
+      WHERE x.user_id = ? AND s.date BETWEEN ? AND ?`).all(userId, from, to);
+    for (const r of rows) {
+      db.prepare('DELETE FROM assignments WHERE shift_id = ? AND user_id = ?').run(r.shift_id, userId);
+      audit(actorId, 'assignment.remove', { shift_id: r.shift_id, user_id: userId, reason, automatisch: true });
+    }
+    return rows.length;
+  };
+
+  const urlaubKonto = (u, year) => {
+    const sum = (status) => db.prepare(`SELECT from_date, to_date FROM absences WHERE user_id = ? AND type = 'urlaub' AND status = ?
+      AND from_date <= ? AND to_date >= ?`).all(u.id, status, `${year}-12-31`, `${year}-01-01`)
+      .reduce((acc, a) => acc + T.arbeitstage(a.from_date < `${year}-01-01` ? `${year}-01-01` : a.from_date, a.to_date > `${year}-12-31` ? `${year}-12-31` : a.to_date), 0);
+    const genehmigt = sum('genehmigt');
+    const beantragt = sum('beantragt');
+    return { jahr: year, anspruch: u.urlaubstage_jahr, genehmigt, beantragt, rest: u.urlaubstage_jahr - genehmigt - beantragt };
+  };
+
+  const loadAbsence = (req) => {
+    const a = db.prepare('SELECT * FROM absences WHERE id = ?').get(Number(req.params.id));
+    if (!a || (req.user.role !== 'manager' && a.user_id !== req.user.id)) throw new HttpError(404, 'Eintrag nicht gefunden.');
+    return a;
+  };
+
+  app.get('/api/absences', auth, wrap((req) => {
+    const settings = getSettings();
+    const isMgr = req.user.role === 'manager';
+    const cond = [];
+    const params = [];
+    if (!isMgr) { cond.push('a.user_id = ?'); params.push(req.user.id); } else if (req.query.user_id) { cond.push('a.user_id = ?'); params.push(Number(req.query.user_id)); }
+    if (isoDate(req.query.from)) { cond.push('a.to_date >= ?'); params.push(req.query.from); }
+    if (isoDate(req.query.to)) { cond.push('a.from_date <= ?'); params.push(req.query.to); }
+    if (req.query.status) { cond.push('a.status = ?'); params.push(String(req.query.status)); }
+    const rows = db.prepare(`SELECT a.*, u.name, u.qualification FROM absences a JOIN users u ON u.id = a.user_id
+      ${cond.length ? 'WHERE ' + cond.join(' AND ') : ''} ORDER BY a.from_date DESC, a.id DESC LIMIT 500`).all(...params);
+    const year = Number(req.query.year) || Number(T.isoDate(nowLocalMs()).slice(0, 4));
+    return {
+      absences: rows.map((a) => decorateAbsence(a, settings)),
+      urlaub: isMgr ? null : urlaubKonto(req.user, year),
+      au_ab_tag: settings.au_ab_tag,
+    };
+  }));
+
+  app.post('/api/absences', auth, wrap((req) => {
+    const settings = getSettings();
+    const b = req.body || {};
+    const isMgr = req.user.role === 'manager';
+    const userId = isMgr && b.user_id ? Number(b.user_id) : req.user.id;
+    const u = db.prepare('SELECT * FROM users WHERE id = ? AND active = 1').get(userId);
+    if (!u) throw new HttpError(404, 'Mitarbeiter/in nicht gefunden.');
+    if (!['urlaub', 'krank'].includes(b.type)) throw new HttpError(400, 'Art muss Urlaub oder Krankheit sein.');
+    if (!isoDate(b.from) || !isoDate(b.to) || b.from > b.to) throw new HttpError(400, 'Zeitraum ungültig.');
+    if ((T.parseDate(b.to) - T.parseDate(b.from)) / T.DAY > 366) throw new HttpError(400, 'Zeitraum zu lang.');
+    const today = T.isoDate(nowLocalMs());
+    if (!isMgr) {
+      if (b.type === 'urlaub' && b.from < today) throw new HttpError(400, 'Urlaub kann nicht rückwirkend beantragt werden.');
+      if (b.type === 'krank' && T.parseDate(today) - T.parseDate(b.from) > 14 * T.DAY) throw new HttpError(400, 'Krankmeldungen bitte innerhalb von 14 Tagen eintragen, sonst über die Einsatzplanung.');
+    }
+    const overlap = db.prepare(`SELECT * FROM absences WHERE user_id = ? AND status IN ('beantragt','genehmigt','gemeldet')
+      AND from_date <= ? AND to_date >= ?`).get(userId, b.to, b.from);
+    if (overlap) throw new HttpError(409, `Im Zeitraum gibt es bereits einen Eintrag (${overlap.type === 'krank' ? 'Krankheit' : 'Urlaub'} ${overlap.from_date} – ${overlap.to_date}).`, 'UEBERSCHNEIDUNG');
+    if (b.type === 'urlaub') {
+      const tage = T.arbeitstage(b.from, b.to);
+      if (tage === 0) throw new HttpError(400, 'Im gewählten Zeitraum liegen keine Arbeitstage.');
+    }
+    const note = String(b.note || '').trim().slice(0, 500);
+    const status = b.type === 'krank' ? 'gemeldet' : (isMgr ? 'genehmigt' : 'beantragt');
+    const id = db.prepare(`INSERT INTO absences (user_id, type, from_date, to_date, status, note, created_by, decided_by, decided_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(userId, b.type, b.from, b.to, status, note, req.user.id,
+      status === 'genehmigt' ? req.user.id : null, status === 'genehmigt' ? new Date().toISOString() : null).lastInsertRowid;
+    let removed = 0;
+    if (status !== 'beantragt') {
+      removed = removeAssignmentsInRange(userId, b.from, b.to, req.user.id, b.type === 'krank' ? 'Krankmeldung' : 'Urlaub genehmigt');
+    }
+    audit(req.user.id, 'absence.create', { id, user_id: userId, type: b.type, from: b.from, to: b.to, status, note, removed });
+    const a = db.prepare('SELECT a.*, u.name FROM absences a JOIN users u ON u.id = a.user_id WHERE a.id = ?').get(id);
+    return { ...decorateAbsence(a, settings), removed };
+  }));
+
+  /** Genehmigen / Ablehnen eines Urlaubsantrags */
+  app.put('/api/absences/:id/decision', auth, manager, wrap((req) => {
+    const settings = getSettings();
+    const a = loadAbsence(req);
+    if (a.type !== 'urlaub') throw new HttpError(400, 'Nur Urlaubsanträge werden genehmigt.');
+    const status = req.body?.status;
+    if (!['genehmigt', 'abgelehnt'].includes(status)) throw new HttpError(400, 'Status ungültig.');
+    const note = String(req.body?.note || '').trim().slice(0, 500);
+    if (status === 'abgelehnt' && note.length < 3) throw new HttpError(400, 'Bitte eine Begründung für die Ablehnung angeben.', 'BEGRUENDUNG');
+    db.prepare('UPDATE absences SET status = ?, decision_note = ?, decided_by = ?, decided_at = ? WHERE id = ?')
+      .run(status, note, req.user.id, new Date().toISOString(), a.id);
+    const removed = status === 'genehmigt' ? removeAssignmentsInRange(a.user_id, a.from_date, a.to_date, req.user.id, 'Urlaub genehmigt') : 0;
+    audit(req.user.id, 'absence.decide', { id: a.id, user_id: a.user_id, status, note, removed });
+    const fresh = db.prepare('SELECT a.*, u.name FROM absences a JOIN users u ON u.id = a.user_id WHERE a.id = ?').get(a.id);
+    return { ...decorateAbsence(fresh, settings), removed };
+  }));
+
+  /** Krankmeldung verlängern / verkürzen (Mitarbeitende: nur eigene Krankmeldung) */
+  app.put('/api/absences/:id', auth, wrap((req) => {
+    const settings = getSettings();
+    const a = loadAbsence(req);
+    const isMgr = req.user.role === 'manager';
+    if (!isMgr && a.type !== 'krank') throw new HttpError(403, 'Urlaubsanträge können nur zurückgezogen werden.');
+    const to = req.body?.to;
+    const from = isMgr && isoDate(req.body?.from) ? req.body.from : a.from_date;
+    if (!isoDate(to) || to < from) throw new HttpError(400, 'Enddatum ungültig.');
+    const overlap = db.prepare(`SELECT 1 FROM absences WHERE user_id = ? AND id <> ? AND status IN ('beantragt','genehmigt','gemeldet')
+      AND from_date <= ? AND to_date >= ?`).get(a.user_id, a.id, to, from);
+    if (overlap) throw new HttpError(409, 'Der neue Zeitraum überschneidet sich mit einem anderen Eintrag.');
+    db.prepare('UPDATE absences SET from_date = ?, to_date = ? WHERE id = ?').run(from, to, a.id);
+    let removed = 0;
+    if (a.status !== 'beantragt' && a.status !== 'abgelehnt') {
+      removed = removeAssignmentsInRange(a.user_id, from, to, req.user.id, a.type === 'krank' ? 'Krankmeldung verlängert' : 'Urlaub geändert');
+    }
+    audit(req.user.id, 'absence.update', { id: a.id, user_id: a.user_id, from, to, removed });
+    const fresh = db.prepare('SELECT a.*, u.name FROM absences a JOIN users u ON u.id = a.user_id WHERE a.id = ?').get(a.id);
+    return { ...decorateAbsence(fresh, settings), removed };
+  }));
+
+  app.delete('/api/absences/:id', auth, wrap((req) => {
+    const a = loadAbsence(req);
+    const isMgr = req.user.role === 'manager';
+    if (!isMgr && !(a.type === 'urlaub' && a.status === 'beantragt')) {
+      throw new HttpError(403, 'Nur noch nicht entschiedene Urlaubsanträge können zurückgezogen werden. Bitte wenden Sie sich an die Einsatzplanung.');
+    }
+    for (const f of db.prepare('SELECT stored_name FROM attachments WHERE absence_id = ?').all(a.id)) {
+      fs.rmSync(path.join(uploadDir, f.stored_name), { force: true });
+    }
+    db.prepare('DELETE FROM absences WHERE id = ?').run(a.id);
+    audit(req.user.id, 'absence.delete', { id: a.id, user_id: a.user_id, type: a.type, from: a.from_date, to: a.to_date });
+    return { ok: true };
+  }));
+
+  // ---------- Arbeitsunfähigkeitsbescheinigung (Upload) ----------
+  const MAX_UPLOAD = 10 * 1024 * 1024;
+  const sniffMime = (buf) => {
+    if (buf.length > 4 && buf.subarray(0, 5).toString('latin1') === '%PDF-') return 'application/pdf';
+    if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+    if (buf.length > 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
+    return null;
+  };
+
+  app.post('/api/absences/:id/attachments', auth, express.raw({ type: () => true, limit: MAX_UPLOAD }), wrap((req) => {
+    const a = loadAbsence(req);
+    if (a.type !== 'krank') throw new HttpError(400, 'Bescheinigungen können nur zu Krankmeldungen hochgeladen werden.');
+    const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (!buf.length) throw new HttpError(400, 'Keine Datei empfangen.');
+    const mime = sniffMime(buf);
+    if (!mime) throw new HttpError(400, 'Erlaubt sind PDF, JPG und PNG.');
+    if (db.prepare('SELECT COUNT(*) AS n FROM attachments WHERE absence_id = ?').get(a.id).n >= 10) throw new HttpError(400, 'Maximal 10 Dateien je Krankmeldung.');
+    let filename = '';
+    try { filename = decodeURIComponent(String(req.headers['x-filename'] || '')); } catch { filename = ''; }
+    filename = filename.replace(/[^\p{L}\p{N}._ -]/gu, '_').slice(0, 120) || `bescheinigung.${mime.split('/')[1]}`;
+    const stored = `${crypto.randomUUID()}.${mime === 'application/pdf' ? 'pdf' : mime.split('/')[1]}`;
+    fs.mkdirSync(uploadDir, { recursive: true });
+    fs.writeFileSync(path.join(uploadDir, stored), buf, { mode: 0o600 });
+    const id = db.prepare('INSERT INTO attachments (absence_id, filename, stored_name, mime, size, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(a.id, filename, stored, mime, buf.length, req.user.id).lastInsertRowid;
+    audit(req.user.id, 'attachment.upload', { id, absence_id: a.id, user_id: a.user_id, filename });
+    const fresh = db.prepare('SELECT a.*, u.name FROM absences a JOIN users u ON u.id = a.user_id WHERE a.id = ?').get(a.id);
+    return decorateAbsence(fresh, getSettings());
+  }));
+
+  const loadAttachment = (req) => {
+    const f = db.prepare('SELECT f.*, a.user_id FROM attachments f JOIN absences a ON a.id = f.absence_id WHERE f.id = ?').get(Number(req.params.id));
+    if (!f || (req.user.role !== 'manager' && f.user_id !== req.user.id)) throw new HttpError(404, 'Datei nicht gefunden.');
+    return f;
+  };
+
+  app.get('/api/attachments/:id', auth, (req, res, next) => {
+    try {
+      const f = loadAttachment(req);
+      res.setHeader('Content-Type', f.mime);
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.setHeader('Content-Disposition', `${req.query.inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(f.filename)}`);
+      res.sendFile(path.join(uploadDir, f.stored_name), (err) => { if (err && !res.headersSent) next(new HttpError(404, 'Datei fehlt.')); });
+    } catch (e) { next(e); }
+  });
+
+  app.delete('/api/attachments/:id', auth, wrap((req) => {
+    const f = loadAttachment(req);
+    if (req.user.role !== 'manager' && f.uploaded_by !== req.user.id) throw new HttpError(403, 'Nicht erlaubt.');
+    fs.rmSync(path.join(uploadDir, f.stored_name), { force: true });
+    db.prepare('DELETE FROM attachments WHERE id = ?').run(f.id);
+    audit(req.user.id, 'attachment.delete', { id: f.id, absence_id: f.absence_id });
+    return { ok: true };
   }));
 
   // ---------- Auswertung / Zeitkonto nach TVöD ----------
@@ -549,6 +850,7 @@ function createApp(db) {
     const users = userFilter
       ? db.prepare('SELECT * FROM users WHERE id = ?').all(userFilter)
       : db.prepare("SELECT * FROM users WHERE role = 'staff' AND active = 1 ORDER BY name").all();
+    const r2 = (x) => Math.round(x * 100) / 100;
     const rows = users.map((u) => {
       const shifts = db.prepare(`SELECT s.* FROM shifts s JOIN assignments a ON a.shift_id = s.id
         WHERE a.user_id = ? AND s.date BETWEEN ? AND ?`).all(u.id, from, to);
@@ -560,21 +862,36 @@ function createApp(db) {
         if (b.nachtschicht) nachtschichten++;
         euro += T.zuschlagEuro(b, settings, u.stundenentgelt);
       }
+      // Urlaub (genehmigt) und Krankheit: je Arbeitstag 1/5 der Wochenarbeitszeit (§ 6 Abs. 3, § 21 TVöD, vereinfacht)
+      const abs = db.prepare(`SELECT * FROM absences WHERE user_id = ? AND status IN ('genehmigt','gemeldet')
+        AND from_date <= ? AND to_date >= ?`).all(u.id, to, from);
+      let urlaubTage = 0, krankTage = 0, auFehlt = 0;
+      for (const a of abs) {
+        const tage = T.arbeitstage(a.from_date < from ? from : a.from_date, a.to_date > to ? to : a.to_date);
+        if (a.type === 'urlaub') urlaubTage += tage; else krankTage += tage;
+        if (auRequired(a, settings) && !db.prepare('SELECT 1 FROM attachments WHERE absence_id = ?').get(a.id)) auFehlt++;
+      }
+      const perDay = (Number(u.weekly_hours) || 0) / 5;
+      const urlaubStd = urlaubTage * perDay;
+      const krankStd = krankTage * perDay;
+      const ist = sum.stunden + urlaubStd + krankStd;
       const soll = T.sollStunden(y, m, u.weekly_hours);
-      const r2 = (x) => Math.round(x * 100) / 100;
       return {
         user_id: u.id, name: u.name, qualification: u.qualification, weekly_hours: u.weekly_hours,
         min_hours_month: u.min_hours_month, dienste: shifts.length, nachtschichten,
-        soll: r2(soll), ist: r2(sum.stunden), saldo: r2(sum.stunden - soll),
+        gearbeitet: r2(sum.stunden), urlaub_tage: urlaubTage, urlaub_std: r2(urlaubStd), krank_tage: krankTage, krank_std: r2(krankStd),
+        au_fehlt: auFehlt, soll: r2(soll), ist: r2(ist), saldo: r2(ist - soll),
         nacht: r2(sum.nacht), samstag: r2(sum.samstag), sonntag: r2(sum.sonntag), feiertag: r2(sum.feiertag), vorfest: r2(sum.vorfest),
-        zuschlag_eur: r2(euro), min_erfuellt: sum.stunden + 1e-9 >= (u.min_hours_month || 0),
+        zuschlag_eur: r2(euro), min_erfuellt: ist + 1e-9 >= (u.min_hours_month || 0),
       };
     });
-    const understaffed = db.prepare(`SELECT s.id, s.date, s.min_staff, u.name AS unit_name, st.code,
-      (SELECT COUNT(*) FROM assignments a WHERE a.shift_id = s.id) AS besetzt
-      FROM shifts s JOIN units u ON u.id = s.unit_id JOIN shift_types st ON st.id = s.shift_type_id
-      WHERE s.date BETWEEN ? AND ? AND besetzt < s.min_staff ORDER BY s.date, s.start_time`).all(from, to);
-    return { month, from, to, rows, understaffed: userFilter ? [] : understaffed };
+    const understaffed = userFilter ? [] : loadShifts('s.date BETWEEN ? AND ?', [from, to])
+      .filter((s) => s.assigned.length < s.min_staff || s.qual_missing.length)
+      .map((s) => ({
+        id: s.id, date: s.date, unit_name: s.unit_name, code: s.type_code, besetzt: s.assigned.length, min_staff: s.min_staff,
+        fehlt: s.qual_missing.map((q) => `${q.need - q.have}× ${q.qualification}`).join(', '),
+      }));
+    return { month, from, to, rows, understaffed };
   };
 
   app.get('/api/report', auth, wrap((req) => {
@@ -585,11 +902,13 @@ function createApp(db) {
   app.get('/api/report.csv', auth, manager, wrap((req, res) => {
     const r = report(req.query.month, null);
     const num = (x) => String(x).replace('.', ',');
-    const head = ['Name', 'Qualifikation', 'Wochenstd.', 'Soll', 'Ist', 'Saldo', 'Mindeststd.', 'Mindeststd. erfüllt', 'Dienste',
-      'Nachtschichten', 'Nacht-Std.', 'Samstag-Std.', 'Sonntag-Std.', 'Feiertag-Std.', 'Vorfest-Std.', 'Zuschläge EUR'];
-    const lines = [head, ...r.rows.map((x) => [x.name, x.qualification, num(x.weekly_hours), num(x.soll), num(x.ist), num(x.saldo),
+    const head = ['Name', 'Qualifikation', 'Wochenstd.', 'Soll', 'Gearbeitet', 'Urlaubstage', 'Urlaub Std.', 'Krankheitstage', 'Krank Std.',
+      'Ist gesamt', 'Saldo', 'Mindeststd.', 'Mindeststd. erfüllt', 'Dienste', 'Nachtschichten', 'Nacht-Std.', 'Samstag-Std.',
+      'Sonntag-Std.', 'Feiertag-Std.', 'Vorfest-Std.', 'Zuschläge EUR', 'AU fehlt'];
+    const lines = [head, ...r.rows.map((x) => [x.name, x.qualification, num(x.weekly_hours), num(x.soll), num(x.gearbeitet),
+      x.urlaub_tage, num(x.urlaub_std), x.krank_tage, num(x.krank_std), num(x.ist), num(x.saldo),
       num(x.min_hours_month), x.min_erfuellt ? 'ja' : 'nein', x.dienste, x.nachtschichten, num(x.nacht), num(x.samstag),
-      num(x.sonntag), num(x.feiertag), num(x.vorfest), num(x.zuschlag_eur)])];
+      num(x.sonntag), num(x.feiertag), num(x.vorfest), num(x.zuschlag_eur), x.au_fehlt])];
     const csv = '﻿' + lines.map((l) => l.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="zeitkonto-${r.month}.csv"`);
