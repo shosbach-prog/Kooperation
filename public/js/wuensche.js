@@ -46,11 +46,12 @@ async function renderWuensche() {
     const wd = weekday(d);
     cells.push(h('button', {
       type: 'button', class: `wish-day${w ? ` wish-${w.art}` : ''}${wd === 0 || wd === 6 ? ' weekend' : ''}${gesperrt ? ' locked' : ''}`,
-      disabled: gesperrt, 'aria-label': `${WD[wd]} ${fmtDate(d)}${w ? `: ${w.art === 'frei' ? 'Wunsch frei' : `Wunschdienst ${w.type_name}`}` : ''}${a ? `, ${absLabel(a)}` : ''}`,
+      disabled: gesperrt,
       onclick: () => edit(d),
-    }, h('span', { class: 'wd-num' }, String(Number(d.slice(8)))),
-    w ? h('span', { class: 'wish-tag' }, w.art === 'frei' ? 'frei' : w.type_code) : null,
-    a ? h('span', { class: 'wish-abs' }, absLabel(a)) : null));
+    }, h('span', { class: 'sr-only' }, `${WD[wd]} ${fmtDate(d)}${w ? `: ${w.art === 'frei' ? 'Wunsch frei' : `Wunschdienst ${w.type_name}`}` : ''}${a ? `, ${absLabel(a)}` : ''}${gesperrt ? ' (gesperrt)' : ''}`),
+    h('span', { class: 'wd-num', 'aria-hidden': 'true' }, String(Number(d.slice(8)))),
+    w ? h('span', { class: 'wish-tag', 'aria-hidden': 'true' }, w.art === 'frei' ? 'frei' : w.type_code) : null,
+    a ? h('span', { class: 'wish-abs', 'aria-hidden': 'true' }, absLabel(a)) : null));
   }
   const monthName = new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('de-DE', { month: 'long', year: 'numeric', timeZone: 'UTC' });
   setMain(h('div', { class: 'card' },

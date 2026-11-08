@@ -15,6 +15,7 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <a class="skip-link" href="#main" onclick="event.preventDefault(); document.getElementById('main').focus();">Zum Inhalt springen</a>
   <header id="topbar" hidden>
     <div class="brand"><span class="brand-mark" id="brand-mark"><span class="logo">⊕</span></span>
       <span class="brand-text"><span id="clinic-name"></span><span class="brand-sub" id="brand-sub"></span></span></div>
@@ -24,7 +25,7 @@
 
   <div class="nav-backdrop" id="nav-backdrop"></div>
   <nav id="bottomnav" aria-label="Schnellzugriff" hidden></nav>
-  <main id="main"></main>
+  <main id="main" tabindex="-1"></main>
   <div id="toast" role="status" aria-live="polite"></div>
 
   <template id="login-tpl">

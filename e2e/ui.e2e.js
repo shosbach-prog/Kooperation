@@ -1,0 +1,145 @@
+'use strict';
+/**
+ * Oberflächentests im echten Browser (Chromium über Playwright):
+ * alle Ansichten auf Handy und PC, Barrierefreiheit (axe-core, WCAG 2.1 AA), typische Abläufe.
+ * Aufruf: npm run test:e2e   (Playwright muss installiert sein, sonst werden die Tests übersprungen)
+ */
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const H = require('./helpers');
+
+const skip = !H.playwright && 'Playwright ist nicht installiert';
+let server, url, browser, mgr, staff;
+
+const VIEWS = {
+  manager: ['plan', 'tausch', 'abwesenheiten', 'staff', 'stationen', 'generate', 'types', 'req', 'zeiten', 'report', 'log', 'settings', 'account'],
+  staff: ['plan', 'mine', 'abwesenheit', 'konto', 'wuensche', 'tausch', 'account'],
+};
+const DEVICES = () => ({
+  'iPhone 13': H.playwright.devices['iPhone 13'],
+  'Tablet quer': { viewport: { width: 1180, height: 820 }, hasTouch: true },
+  'PC': { viewport: { width: 1440, height: 900 } },
+});
+const iso = (d) => d.toISOString().slice(0, 10);
+
+test.before(async () => {
+  if (skip) return;
+  ({ server, url } = await H.startServer());
+  browser = await H.playwright.chromium.launch({ args: ['--no-proxy-server'] });
+  mgr = await H.loginState(browser, url, 'manager', 'manager123');
+  staff = await H.loginState(browser, url, 'abecker', 'demo123');
+  // Dienste für die nächsten Wochen erzeugen
+  const ctx = await browser.newContext({ storageState: mgr.state });
+  const from = iso(new Date(Date.now() - 7 * 864e5));
+  const to = iso(new Date(Date.now() + 35 * 864e5));
+  const r = await ctx.request.post(`${url}api/shifts/generate`, { data: { from, to } });
+  assert.equal(r.status(), 200);
+  await ctx.close();
+});
+test.after(async () => { await browser?.close(); server?.close(); });
+
+async function open(device, state, extra = {}) {
+  const ctx = await browser.newContext({ ...device, ...(state ? { storageState: state } : {}), ...extra });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  return { ctx, page, errors };
+}
+async function show(page, view) {
+  await page.goto(`${url}#${view}`);
+  await page.waitForSelector('#main > *');
+  await page.waitForLoadState('networkidle');
+}
+
+test('Anmeldeseite: barrierefrei, Impressum/Datenschutz erreichbar, Sprunglink', { skip }, async () => {
+  const { ctx, page, errors } = await open(DEVICES()['iPhone 13']);
+  await page.goto(url);
+  await page.waitForSelector('#login-form');
+  assert.deepEqual(await H.axe(page), []);
+  // Sprunglink: wird bei Fokus sichtbar und setzt den Fokus auf den Inhalt
+  await page.focus('.skip-link');
+  assert.ok(await page.evaluate(() => document.querySelector('.skip-link').getBoundingClientRect().top >= 0));
+  await page.keyboard.press('Enter');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'main');
+  await page.click('.legal-links >> text=Datenschutz');
+  await page.waitForSelector('.legal-text');
+  assert.deepEqual(await H.axe(page), []);
+  await page.click('text=Schließen');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+for (const role of ['manager', 'staff']) {
+  test(`Alle Ansichten (${role === 'manager' ? 'Verwaltung' : 'Mitarbeitende'}): Darstellung, Fehler, Barrierefreiheit`, { skip }, async () => {
+    const problems = [];
+    for (const [name, device] of Object.entries(DEVICES())) {
+      const { ctx, page, errors } = await open(device, (role === 'manager' ? mgr : staff).state);
+      for (const v of VIEWS[role]) {
+        await show(page, v);
+        for (const p of await H.layoutProblems(page)) problems.push(`${name} #${v}: ${p}`);
+        // axe einmal je Ansicht (auf dem Handy und am PC) – der Tablet-Durchlauf prüft nur das Layout
+        if (name !== 'Tablet quer') for (const p of await H.axe(page)) problems.push(`${name} #${v}: ${p}`);
+      }
+      for (const e of errors) problems.push(`${name}: JS-Fehler ${e}`);
+      await ctx.close();
+    }
+    assert.deepEqual(problems, []);
+  });
+}
+
+test('Dunkler Modus: Kontraste', { skip }, async () => {
+  const { ctx, page } = await open(DEVICES().PC, staff.state, { colorScheme: 'dark' });
+  const problems = [];
+  for (const v of ['plan', 'mine', 'abwesenheit', 'wuensche']) {
+    await show(page, v);
+    for (const p of await H.axe(page)) problems.push(`#${v}: ${p}`);
+  }
+  assert.deepEqual(problems, []);
+  await ctx.close();
+});
+
+test('Ablauf: Urlaub beantragen und genehmigen', { skip }, async () => {
+  // nächster Montag in mindestens 3 Wochen
+  const d = new Date(Date.now() + 21 * 864e5);
+  while (d.getUTCDay() !== 1) d.setUTCDate(d.getUTCDate() + 1);
+  const mo = iso(d);
+  const fr = iso(new Date(d.getTime() + 4 * 864e5));
+
+  const s = await open(DEVICES()['iPhone 13'], staff.state);
+  await show(s.page, 'abwesenheit');
+  const card = s.page.locator('.card', { has: s.page.locator('h2', { hasText: 'Urlaub beantragen' }) });
+  await card.locator('input[type=date]').nth(0).fill(mo);
+  await card.locator('input[type=date]').nth(1).fill(fr);
+  await card.locator('button[type=submit]').click();
+  await s.page.waitForSelector('td:has-text("beantragt")');
+  assert.deepEqual(await H.axe(s.page), []);
+  await s.ctx.close();
+
+  const m = await open(DEVICES().PC, mgr.state);
+  await show(m.page, 'abwesenheiten');
+  const row = m.page.locator('tr', { hasText: 'Anna Becker' }).filter({ has: m.page.locator('button', { hasText: 'Genehmigen' }) }).first();
+  await row.locator('button', { hasText: 'Genehmigen' }).click();
+  await m.page.locator('dialog[open] button', { hasText: 'Genehmigen' }).click();
+  await m.page.waitForFunction(() => ![...document.querySelectorAll('tr')].some((tr) => tr.textContent.includes('Anna Becker') && tr.textContent.includes('Genehmigen')));
+  assert.deepEqual(m.errors, []);
+  await m.ctx.close();
+
+  const s2 = await open(DEVICES()['iPhone 13'], staff.state);
+  await show(s2.page, 'abwesenheit');
+  assert.ok(await s2.page.locator('td', { hasText: 'genehmigt' }).count() >= 1);
+  await s2.ctx.close();
+});
+
+test('Ablauf: Dialoge sind per Tastatur bedienbar und barrierefrei', { skip }, async () => {
+  const { ctx, page, errors } = await open(DEVICES().PC, mgr.state);
+  await show(page, 'stationen');
+  await page.locator('button', { hasText: /Gebäude/ }).first().click();
+  await page.waitForSelector('dialog[open]');
+  assert.deepEqual(await H.axe(page), []);
+  // Fokus liegt im Dialog, Escape schließt ihn
+  assert.ok(await page.evaluate(() => !!document.activeElement.closest('dialog')));
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('dialog[open]').count(), 0);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});

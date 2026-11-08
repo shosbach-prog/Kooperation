@@ -78,3 +78,18 @@ Am besten mit zwei Browserfenstern: eines normal (Manager) und eines im privaten
 15. ☐ **Einstellungen:** z. B. „AU ab Tag“ auf 1 setzen oder die Qualifikationsliste ergänzen.
 
 Bitte notieren Sie, was fehlt, was unklar ist oder was anders sein soll. Dann wird es angepasst.
+
+## Automatische Tests
+
+```bash
+npm test            # Server-Tests: Rechte, TVöD-Berechnung, 2FA, Abwesenheiten, Exporte …
+npm run test:e2e    # Oberflächentests im Browser (benötigt Playwright mit Chromium)
+```
+
+Die Oberflächentests (`e2e/`) öffnen jede Ansicht auf Handy, Tablet und PC – als Verwaltung und als Mitarbeitende – und prüfen:
+
+- keine JavaScript-Fehler, kein seitliches Verrutschen, ausreichend große Tippflächen,
+- Barrierefreiheit nach WCAG 2.1 AA mit **axe-core** (Kontraste, Beschriftungen, Tastaturbedienung) – auch im dunklen Modus und in Dialogen,
+- typische Abläufe: Urlaub beantragen → genehmigen, Dialoge per Tastatur (Escape schließt).
+
+Playwright installieren, falls nicht vorhanden: `npm i -D playwright && npx playwright install chromium`.

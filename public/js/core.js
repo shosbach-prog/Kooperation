@@ -79,8 +79,23 @@ function stackTables(root) {
     const heads = [...table.querySelectorAll('thead th')].map((th) => th.textContent);
     table.classList.add('stack');
     for (const tr of table.querySelectorAll('tbody tr')) {
-      [...tr.children].forEach((td, i) => { if (heads[i]) td.dataset.label = heads[i]; });
+      [...tr.children].forEach((td, i) => {
+        if (!heads[i]) return;
+        td.dataset.label = heads[i];
+        // Eingabefelder in Tabellenzellen bekommen die Spaltenüberschrift als Namen (Screenreader)
+        for (const el of td.querySelectorAll('input, select, textarea')) {
+          if (!el.hasAttribute('aria-label') && !el.closest('label') && !el.id) el.setAttribute('aria-label', heads[i]);
+        }
+      });
     }
+  }
+  // Scrollbare Bereiche per Tastatur erreichbar machen
+  for (const sc of root.querySelectorAll('.table-wrap, .plan-scroll')) {
+    if (sc.hasAttribute('tabindex')) continue;
+    sc.setAttribute('tabindex', '0');
+    sc.setAttribute('role', 'region');
+    const head = sc.querySelector('h3, caption') || sc.closest('.card')?.querySelector('h2');
+    sc.setAttribute('aria-label', head ? head.textContent.trim().slice(0, 60) : 'Tabelle');
   }
   requestAnimationFrame(() => fitTables(root));
 }

@@ -20,7 +20,7 @@ async function showLegal(kind) {
   await openDialog((close) => h('div', { class: 'ui-dialog-body legal' },
     h('h2', {}, title),
     kind !== 'impressum' && l.datenschutz_muster ? h('p', {}, h('span', { class: 'badge warn' }, 'Muster – noch nicht freigegeben')) : null,
-    h('div', { class: 'legal-text' }, textBlocks(text)),
+    h('div', { class: 'legal-text', tabindex: '0', role: 'region', 'aria-label': title }, textBlocks(text)),
     h('div', { class: 'ui-dialog-actions' }, h('button', { type: 'button', onclick: () => close(null) }, 'Schließen'))));
 }
 

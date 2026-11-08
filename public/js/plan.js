@@ -211,7 +211,7 @@ function renderCell(s, staffUsers, compact = false) {
   if (canManageUnit(s.unit_id)) {
     const free = staffUsers.filter((u) => !s.assigned.some((a) => a.user_id === u.id));
     if (free.length) {
-      action = h('select', { onchange: (e) => { if (e.target.value) assign(s, Number(e.target.value)); } },
+      action = h('select', { 'aria-label': `Person für ${s.type_name} am ${fmtDate(s.date)} (${s.unit_name}) eintragen`, onchange: (e) => { if (e.target.value) assign(s, Number(e.target.value)); } },
         h('option', { value: '' }, compact ? '+ Person' : '+ Person eintragen'), free.map((u) => {
           const ab = absentIds.get(u.id);
           const w = wishOf(u.id, s.date);
