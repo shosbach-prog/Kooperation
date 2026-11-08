@@ -109,5 +109,57 @@ async function renderGenerate() {
           state.weekStart = mondayOf(fromI.value);
         } catch (e) { toast(e.message, true); }
       },
-    }, 'Schichten erzeugen'))));
+    }, 'Schichten erzeugen'))),
+  planvorschlagCard(fromI, toI, checks));
+}
+
+/** Automatischer Planvorschlag: Vorschau mit Begründung, Auswahl, Übernahme */
+function planvorschlagCard(fromI, toI, checks) {
+  const result = h('div');
+  const card = h('div', { class: 'card' }, h('h2', {}, 'Planvorschlag'),
+    h('p', { class: 'muted' }, 'Füllt Dienste unter der Mindestbesetzung automatisch und fair auf – mit denselben Regeln wie beim Eintragen ',
+      '(Abwesenheit, „Wunsch frei“, Ruhezeit, Arbeitszeitregeln, Qualifikation, Soll-Stunden). Sie sehen zuerst eine Vorschau und entscheiden dann.'),
+    h('p', {}, h('button', { onclick: async () => {
+      const ids = checks.map((c) => c.querySelector('input')).filter((c) => c.checked).map((c) => Number(c.value));
+      result.replaceChildren(h('p', { class: 'muted' }, 'Berechne …'));
+      try {
+        const r = await api('POST', 'api/planvorschlag', { from: fromI.value, to: toI.value, unit_ids: ids });
+        showVorschlag(result, r);
+      } catch (e) { result.replaceChildren(); toast(e.message, true); }
+    } }, 'Vorschlag berechnen')),
+    result);
+  return card;
+}
+
+function showVorschlag(target, r) {
+  const boxes = r.vorschlaege.map((v) => h('input', { type: 'checkbox', checked: true, 'aria-label': `${v.name} am ${fmtDate(v.date)} übernehmen` }));
+  const all = h('input', { type: 'checkbox', checked: true, 'aria-label': 'alle auswählen', onchange: (e) => boxes.forEach((b) => { b.checked = e.target.checked; }) });
+  const perPerson = new Map();
+  for (const v of r.vorschlaege) perPerson.set(v.name, (perPerson.get(v.name) || 0) + 1);
+  target.replaceChildren(
+    h('div', { class: 'toolbar' },
+      h('span', { class: 'badge ok' }, `${r.vorschlaege.length} Vorschläge`),
+      r.offen.length ? h('span', { class: 'badge bad' }, `${r.offen.length} Dienste bleiben offen`) : h('span', { class: 'badge ok' }, 'alle Lücken gefüllt'),
+      h('span', { class: 'small muted' }, [...perPerson].sort((a, b) => b[1] - a[1]).map(([n, c]) => `${n} ${c}`).join(' · '))),
+    r.vorschlaege.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'keep-table' },
+      h('thead', {}, h('tr', {}, h('th', {}, all), ...['Datum', 'Dienst', 'Station', 'Person', 'Begründung'].map((x) => h('th', {}, x)))),
+      h('tbody', {}, r.vorschlaege.map((v, i) => h('tr', {},
+        h('td', {}, boxes[i]), h('td', {}, `${WD[weekday(v.date)]} ${fmtDate(v.date)}`),
+        h('td', {}, h('span', { class: 'chip', style: { background: v.type_color } }, v.type_code), v.type_name),
+        h('td', {}, v.unit_name), h('td', {}, v.name, v.qualification ? h('div', { class: 'small muted' }, v.qualification) : null),
+        h('td', { class: 'small' }, v.grund)))))) : null,
+    r.offen.length ? h('details', {}, h('summary', {}, `Offen gebliebene Dienste (${r.offen.length})`),
+      h('ul', { class: 'small' }, r.offen.map((o) => h('li', {}, `${WD[weekday(o.date)]} ${fmtDate(o.date)} · ${o.type_name} · ${o.unit_name}: fehlt ${o.fehlt}`))),
+      h('p', { class: 'small muted' }, 'Tipp: Rundruf (📣) im Dienstplan nutzen oder Mindestbesetzung bzw. Wünsche prüfen.')) : null,
+    r.vorschlaege.length ? h('div', { class: 'toolbar', style: { marginTop: '.75rem' } }, h('button', { onclick: async () => {
+      const items = r.vorschlaege.filter((_, i) => boxes[i].checked).map((v) => ({ shift_id: v.shift_id, user_id: v.user_id }));
+      if (!items.length) return toast('Nichts ausgewählt.', true);
+      if (!await uiConfirm(`${items.length} Dienste eintragen? Die Personen werden benachrichtigt.`, { title: 'Vorschlag übernehmen?', okText: 'Übernehmen' })) return;
+      try {
+        const res = await api('POST', 'api/planvorschlag/uebernehmen', { items });
+        toast(`${res.eingetragen} Dienste eingetragen${res.fehler.length ? `, ${res.fehler.length} übersprungen (inzwischen geändert)` : ''}.`);
+        target.replaceChildren(h('p', {}, `✓ ${res.eingetragen} Dienste eingetragen. `, h('a', { href: '#plan' }, 'Zum Dienstplan')));
+      } catch (e) { toast(e.message, true); }
+    } }, 'Ausgewählte übernehmen')) : null);
+  stackTables(target);
 }

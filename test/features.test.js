@@ -371,3 +371,68 @@ test('Arbeitszeitregeln und Wechselschichtzulage', async () => {
   const csv = (await mgr('GET', `/api/report.csv?month=${month}`)).data;
   assert.match(csv, /Zulage EUR/);
 });
+
+test('Automatischer Planvorschlag: Vorschau, Regeln, Fairness, Übernahme', async () => {
+  await mgr('PUT', '/api/settings', { max_naechte_folge: 5, max_tage_folge: 6, max_std_woche: 48, ruhezeit_std: 11 });
+  // eine Woche in ferner Zukunft, nur Station 2
+  const mon = (() => { for (let i = 120; ; i++) if (new Date(day(i)).getUTCDay() === 1) return day(i); })();
+  const sun = new Date(Date.parse(mon) + 6 * 86400000).toISOString().slice(0, 10);
+  const units = (await mgr('GET', '/api/units')).data;
+  const s2 = units.find((u) => u.name === 'Station 2').id;
+  await mgr('POST', '/api/shifts/generate', { from: mon, to: sun, unit_ids: [s2] });
+  // Lena möchte am Mittwoch frei, Anna ist Do–Fr krank
+  const wed = new Date(Date.parse(mon) + 2 * 86400000).toISOString().slice(0, 10);
+  await mgr('PUT', '/api/wishes', { user_id: users.lhoffmann, date: wed, art: 'frei' });
+  await mgr('POST', '/api/absences', { user_id: users.abecker, type: 'krank',
+    from: new Date(Date.parse(mon) + 3 * 86400000).toISOString().slice(0, 10), to: new Date(Date.parse(mon) + 4 * 86400000).toISOString().slice(0, 10) });
+
+  const before = (await mgr('GET', `/api/plan?from=${mon}&to=${sun}`)).data.shifts.reduce((a, s) => a + s.assigned.length, 0);
+  const r = await mgr('POST', '/api/planvorschlag', { from: mon, to: sun, unit_ids: [s2] });
+  assert.equal(r.status, 200);
+  const v = r.data.vorschlaege;
+  assert.ok(v.length > 0);
+  // Vorschau ändert nichts
+  const after = (await mgr('GET', `/api/plan?from=${mon}&to=${sun}`)).data.shifts.reduce((a, s) => a + s.assigned.length, 0);
+  assert.equal(after, before);
+  // Regeln
+  assert.ok(!v.some((x) => x.user_id === users.lhoffmann && x.date === wed), 'Wunsch frei verletzt');
+  const thu = new Date(Date.parse(mon) + 3 * 86400000).toISOString().slice(0, 10);
+  const fri = new Date(Date.parse(mon) + 4 * 86400000).toISOString().slice(0, 10);
+  assert.ok(!v.some((x) => x.user_id === users.abecker && (x.date === thu || x.date === fri)), 'Abwesenheit verletzt');
+  const perDay = new Map();
+  for (const x of v) { const k = `${x.user_id}|${x.date}`; perDay.set(k, (perDay.get(k) || 0) + 1); }
+  assert.ok([...perDay.values()].every((n) => n === 1), 'zwei Dienste am selben Tag');
+  assert.ok(v.every((x) => x.grund.length > 0));
+  // Fairness: Unterschied der Dienstanzahl zwischen Personen gleicher Wochenstunden höchstens 3
+  const count = new Map();
+  for (const x of v) count.set(x.user_id, (count.get(x.user_id) || 0) + 1);
+  const full = [users.abecker, users.myilmaz, users.twagner, users.kschulz].map((id) => count.get(id) || 0);
+  assert.ok(Math.max(...full) - Math.min(...full) <= 4, `ungleich verteilt: ${full}`);
+
+  // nur einen Teil übernehmen
+  const pick = v.slice(0, 3).map((x) => ({ shift_id: x.shift_id, user_id: x.user_id }));
+  const res = await mgr('POST', '/api/planvorschlag/uebernehmen', { items: pick });
+  assert.equal(res.data.eingetragen, 3);
+  const plan = (await mgr('GET', `/api/plan?from=${mon}&to=${sun}`)).data.shifts;
+  for (const p of pick) assert.ok(plan.find((s) => s.id === p.shift_id).assigned.some((a) => a.user_id === p.user_id));
+  // doppelt übernehmen → übersprungen
+  const again = await mgr('POST', '/api/planvorschlag/uebernehmen', { items: pick });
+  assert.equal(again.data.eingetragen, 0);
+  assert.equal(again.data.fehler.length, 3);
+  // Rest übernehmen: danach ist jeder Dienst gedeckt (inkl. Qualifikation) oder als offen gemeldet
+  const rest = v.slice(3).map((x) => ({ shift_id: x.shift_id, user_id: x.user_id }));
+  assert.equal((await mgr('POST', '/api/planvorschlag/uebernehmen', { items: rest })).data.eingetragen, rest.length);
+  const offenIds = new Set(r.data.offen.map((o) => o.shift_id));
+  for (const sh of (await mgr('GET', `/api/plan?from=${mon}&to=${sun}`)).data.shifts.filter((x) => x.unit_id === s2)) {
+    if (offenIds.has(sh.id)) continue;
+    assert.ok(sh.assigned.length >= sh.min_staff && sh.qual_missing.length === 0, `Dienst ${sh.id} nicht gedeckt`);
+  }
+  // Mitarbeitende dürfen keinen Vorschlag berechnen
+  const kevin = await as('kschulz');
+  assert.equal((await kevin('POST', '/api/planvorschlag', { from: mon, to: sun })).status, 403);
+  // Benachrichtigung „Neue Dienste eingeplant“
+  const who = pick[0].user_id;
+  const uname = Object.keys(users).find((k) => users[k] === who);
+  const c = await as(uname);
+  assert.ok((await c('GET', '/api/notifications')).data.items.some((n) => n.titel === 'Neue Dienste eingeplant'));
+});
