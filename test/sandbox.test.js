@@ -22,7 +22,8 @@ async function startServer(env) {
 }
 
 test('Startseite mit getrenntem Demo-Bereich: Rollen ohne Anmeldung, echte Daten geschützt', async () => {
-  const { proc, base, dir } = await startServer({});
+  // auch wenn in .env noch der alte DEMO_MODUS=1 steht: echte Daten bleiben geschützt
+  const { proc, base, dir } = await startServer({ DEMO_MODUS: '1' });
   try {
     const live = await (await fetch(`${base}/lwl/api/branding`)).json();
     assert.equal(live.demo, false);

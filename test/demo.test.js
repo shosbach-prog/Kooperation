@@ -58,6 +58,20 @@ test('Demo-Modus: Rollenauswahl ohne Passwort und Code', async () => {
     assert.equal(r.data.user.is_haupt, true);
     assert.equal((await client()('POST', '/api/demo/person', { name: 'x' })).status, 400);
     assert.equal((await client()('POST', '/api/demo/login', { username: 'gibtsnicht' })).status, 404);
+    // Stempeluhr in der Demo: ohne eigenen Dienst in den laufenden Dienst einspringen
+    const leitung = client();
+    await leitung('POST', '/api/demo/login', { username: 'manager' });
+    const d0 = new Date(Date.now() - 86400000).toISOString().slice(0, 10), d1 = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    await leitung('POST', '/api/shifts/generate', { from: d0, to: d1 });
+    const pk = client();
+    await pk('POST', '/api/demo/login', { username: 'kschulz' });
+    const st = (await pk('GET', '/api/stempel')).data;
+    assert.ok(st.vorschlag, 'Demo sollte einen laufenden Dienst anbieten');
+    r = await pk('POST', '/api/stempel/kommen', {});
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal(r.data.laufend.dienst.shift_id, st.vorschlag.shift_id);
+    const plan = (await leitung('GET', `/api/plan?from=${st.vorschlag.date}&to=${st.vorschlag.date}`)).data.shifts.find((x) => x.id === st.vorschlag.shift_id);
+    assert.ok(plan.assigned.some((a) => a.name === 'Kevin Schulz'));
   } finally { server.close(); }
 });
 

@@ -11,6 +11,10 @@
 # =============================================================================
 set -euo pipefail
 
+# Das ganze Skript steckt in main(): Bash liest es so vollständig ein, bevor es losläuft.
+# Wichtig, weil sich diese Datei beim Update (git pull) selbst überschreibt.
+main() {
+
 REPO_URL="https://github.com/shosbach-prog/kooperation.git"
 INSTALL_DIR="/opt/dienstplan"
 DEPLOY_DIR="$INSTALL_DIR/deploy"
@@ -215,3 +219,5 @@ if [ -n "$NEW_BACKUP_PW" ]; then
   printf '\n    \033[1m%s\033[0m\n\n' "$NEW_BACKUP_PW"
   gelb "Ohne dieses Passwort lassen sich Sicherungen NICHT wiederherstellen. Es steht auch in $DEPLOY_DIR/.env."
 fi
+}
+main "$@"

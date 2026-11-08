@@ -69,6 +69,19 @@ module.exports = (app, ctx) => {
     }
     return best;
   };
+  /** Nur Demo-Bereich: gerade laufender Dienst, in den man zum Ausprobieren einspringen kann */
+  const laufenderDienst = (userId, ms) => {
+    if (!ctx.demo) return null;
+    const w = wall(ms);
+    const u = db.prepare('SELECT stammbereich_id FROM users WHERE id = ?').get(userId);
+    const rows = db.prepare(`SELECT s.*, st.name AS type_name, st.code AS type_code, st.color AS type_color, st.art, un.name AS unit_name,
+        (SELECT COUNT(*) FROM assignments a WHERE a.shift_id = s.id) AS besetzt
+      FROM shifts s JOIN shift_types st ON st.id = s.shift_type_id JOIN units un ON un.id = s.unit_id
+      WHERE s.date BETWEEN ? AND ? AND st.art <> 'ruf'`).all(T.isoDate(T.parseDate(w.date) - T.DAY), w.date)
+      .filter((s) => { const iv = T.shiftInterval(s.date, s.start_time, s.end_time); return w.wms >= iv.start - 3600e3 && w.wms < iv.end - 1800e3; })
+      .sort((a, b) => (b.unit_id === u?.stammbereich_id) - (a.unit_id === u?.stammbereich_id) || a.besetzt - b.besetzt);
+    return rows[0] || null;
+  };
   const shiftInfo = (s) => (s ? { shift_id: s.id, date: s.date, start_time: s.start_time, end_time: s.end_time, break_min: s.break_min,
     type_name: s.type_name, type_code: s.type_code, type_color: s.type_color, unit_name: s.unit_name, art: s.art } : null);
   const loadShift = (id) => (id ? db.prepare(`SELECT s.*, st.name AS type_name, st.code AS type_code, st.color AS type_color, st.art, un.name AS unit_name
@@ -108,7 +121,8 @@ module.exports = (app, ctx) => {
         vergessen: t - o.kommen_at > 16 * 3600e3,
       };
     }
-    const vorschlag = o ? null : shiftInfo(findShift(userId, t));
+    let vorschlag = o ? null : shiftInfo(findShift(userId, t));
+    if (!o && !vorschlag) { const l = laufenderDienst(userId, t); if (l) vorschlag = { ...shiftInfo(l), einspringen: true }; }
     const heute = wall(t).date;
     const erledigt = db.prepare(`SELECT DISTINCT shift_id FROM stempel WHERE user_id = ? AND gehen_at IS NOT NULL AND kommen_at > ?`).all(userId, t - 36 * 3600e3)
       .map((r) => r.shift_id).filter(Boolean)
@@ -129,9 +143,15 @@ module.exports = (app, ctx) => {
       ? 'Sie sind seit über 16 Std. eingestempelt – bitte zuerst „Gehen“ mit der tatsächlichen Uhrzeit nachtragen.'
       : 'Sie sind bereits eingestempelt.', 'OFFEN');
     const s = req.body?.shift_id ? db.prepare('SELECT s.* FROM shifts s JOIN assignments a ON a.shift_id = s.id WHERE s.id = ? AND a.user_id = ?').get(Number(req.body.shift_id), req.user.id) : findShift(req.user.id, t);
-    if (!s) throw new HttpError(400, 'Für jetzt ist kein Dienst für Sie geplant. Bitte tragen Sie sich zuerst im Dienstplan ein (z. B. beim Einspringen).', 'KEIN_DIENST');
-    const id = db.prepare('INSERT INTO stempel (user_id, shift_id, kommen_at) VALUES (?, ?, ?)').run(req.user.id, s.id, t).lastInsertRowid;
-    audit(req.user.id, 'stempel.kommen', { shift_id: s.id, zeit: wall(t).hms });
+    let sh = s;
+    if (!sh && ctx.demo) {
+      // Demo: automatisch in den laufenden Dienst einspringen (wird im Dienstplan eingetragen)
+      sh = laufenderDienst(req.user.id, t);
+      if (sh) db.prepare('INSERT OR IGNORE INTO assignments (shift_id, user_id, created_by) VALUES (?, ?, ?)').run(sh.id, req.user.id, req.user.id);
+    }
+    if (!sh) throw new HttpError(400, 'Für jetzt ist kein Dienst für Sie geplant. Bitte tragen Sie sich zuerst im Dienstplan ein (z. B. beim Einspringen).', 'KEIN_DIENST');
+    db.prepare('INSERT INTO stempel (user_id, shift_id, kommen_at) VALUES (?, ?, ?)').run(req.user.id, sh.id, t);
+    audit(req.user.id, 'stempel.kommen', { shift_id: sh.id, zeit: wall(t).hms });
     return statusFor(req.user.id);
   }));
 

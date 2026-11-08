@@ -53,8 +53,9 @@ async function stempelCard() {
     if (!L) {
       inhalt = [
         h('p', { class: 'stempel-status' }, 'Nicht eingestempelt'),
+        d.vorschlag?.einspringen ? h('p', { class: 'small' }, h('span', { class: 'badge warn' }, 'Demo'), ' Sie haben gerade keinen Dienst – zum Ausprobieren springen Sie in diesen laufenden Dienst ein:') : null,
         d.vorschlag ? dienstText(d.vorschlag) : h('p', { class: 'small muted' }, 'Für jetzt ist kein Dienst für Sie geplant. Beim Einspringen tragen Sie sich bitte zuerst im Dienstplan ein.'),
-        btn('Kommen', 'kommen', () => stempeln('api/stempel/kommen', { shift_id: d.vorschlag?.shift_id }, re), { disabled: !d.vorschlag }),
+        btn('Kommen', 'kommen', () => stempeln('api/stempel/kommen', d.vorschlag?.einspringen ? {} : { shift_id: d.vorschlag?.shift_id }, re), { disabled: !d.vorschlag }),
       ];
     } else if (L.pause_offen) {
       inhalt = [

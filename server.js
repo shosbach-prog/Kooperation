@@ -18,6 +18,8 @@ const live = createApp(db, {
   uploadDir: process.env.UPLOAD_DIR || path.join(path.dirname(DB_FILE), 'uploads'),
   backupDir: process.env.BACKUP_DIR || path.join(path.dirname(DB_FILE), 'backups'),
   demoLink: DEMO ? `${DEMO_BASE}/` : null,
+  // Anmeldung ohne Passwort gibt es für die echten Daten nur auf reinen Vorführ-Servern ohne Demo-Bereich
+  demo: !DEMO && process.env.DEMO_MODUS === '1',
 });
 
 const sandbox = DEMO ? createDemoSandbox({ dir: path.join(path.dirname(DB_FILE), 'demo'), base: DEMO_BASE, liveLink: `${BASE}/` }) : null;
