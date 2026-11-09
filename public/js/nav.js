@@ -19,6 +19,7 @@ const ICON_PATHS = {
   log: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   fingerprint: '<path d="M12 11v3a8 8 0 0 1-1.5 4.7"/><path d="M8.5 9.5A4 4 0 0 1 16 11v2.5a12 12 0 0 1-.8 4.3"/><path d="M5.5 15a12 12 0 0 0 .5-4 6 6 0 0 1 11.3-2.8"/><path d="M3.5 9.5A9 9 0 0 1 20 8"/><path d="M19.5 13.5c0 1.6-.2 3.2-.6 4.7"/>',
+  chat: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c.8-4.2 4-6.5 8-6.5s7.2 2.3 8 6.5"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
@@ -43,6 +44,7 @@ const VIEWS = {
   konto: { label: 'Stundenkonto', short: 'Stunden', icon: 'konto', group: 'mein', render: () => renderKonto(), staff: true },
   wuensche: { label: 'Wünsche', icon: 'star', group: 'mein', render: () => renderWuensche(), staff: true },
   tausch: { label: 'Tauschbörse', short: 'Tausch', icon: 'swap', group: 'mein', render: () => renderTausch(), badge: 'tausch' },
+  rueckmeldung: { label: 'Rückmeldung', icon: 'chat', group: 'mein', render: () => renderRueckmeldung(), badge: 'rueckmeldung' },
   account: { label: 'Mein Profil', short: 'Profil', icon: 'user', group: 'mein', render: () => renderAccount() },
   abwesenheiten: { label: 'Abwesenheiten', short: 'Anträge', icon: 'inbox', group: 'verw', render: () => renderAbsencesMgr(), mgr: true, badge: 'abwesenheiten' },
   staff: { label: 'Personal', icon: 'users', group: 'verw', render: () => renderStaff(), mgr: true },
@@ -116,10 +118,14 @@ async function refreshBadges() {
       state.badges.abwesenheiten = r.absences.filter((a) => a.status === 'beantragt' || a.au_ueberfaellig).length;
     } catch { /* ignorieren */ }
   }
+  if (state.me?.is_haupt && !isDemo()) {
+    try { state.badges.rueckmeldung = (await api('GET', 'api/rueckmeldungen?alle=1')).filter((r) => r.status === 'neu').length; } catch { /* ignorieren */ }
+  }
   renderTabs();
 }
 
 async function go(view) {
+  if (view === 'rueckmeldung' && state.view && state.view !== view) state.vorherigeAnsicht = VIEWS[state.view]?.label || '';
   state.view = view;
   location.hash = view;
   renderTabs();

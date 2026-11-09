@@ -12,8 +12,8 @@ const skip = !H.playwright && 'Playwright ist nicht installiert';
 let server, url, browser, mgr, staff;
 
 const VIEWS = {
-  manager: ['plan', 'tausch', 'abwesenheiten', 'staff', 'stationen', 'generate', 'types', 'req', 'zeiten', 'report', 'log', 'settings', 'account'],
-  staff: ['plan', 'stempel', 'mine', 'abwesenheit', 'konto', 'wuensche', 'tausch', 'account'],
+  manager: ['plan', 'tausch', 'rueckmeldung', 'abwesenheiten', 'staff', 'stationen', 'generate', 'types', 'req', 'zeiten', 'report', 'log', 'settings', 'account'],
+  staff: ['plan', 'stempel', 'mine', 'rueckmeldung', 'abwesenheit', 'konto', 'wuensche', 'tausch', 'account'],
 };
 const DEVICES = () => ({
   'iPhone 13': H.playwright.devices['iPhone 13'],

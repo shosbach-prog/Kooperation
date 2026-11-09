@@ -285,6 +285,22 @@ CREATE TABLE IF NOT EXISTS stempel_pausen (
   ende_at INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS rueckmeldungen (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  name TEXT NOT NULL DEFAULT '',
+  quelle TEXT NOT NULL DEFAULT 'app',
+  art TEXT NOT NULL DEFAULT 'idee' CHECK (art IN ('fehler','idee','lob','frage')),
+  text TEXT NOT NULL,
+  ansicht TEXT NOT NULL DEFAULT '',
+  geraet TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'neu' CHECK (status IN ('neu','in_arbeit','erledigt')),
+  antwort TEXT NOT NULL DEFAULT '',
+  beantwortet_von INTEGER,
+  beantwortet_am TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS passkeys (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

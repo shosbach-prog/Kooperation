@@ -12,14 +12,14 @@ const { createApp } = require('./app');
 
 const iso = (t) => new Date(t).toISOString().slice(0, 10);
 
-function createDemoSandbox({ dir, base, liveLink }) {
+function createDemoSandbox({ dir, base, liveLink, feedbackSink }) {
   let current = null; // { db, handler }
 
   const build = () => {
     fs.rmSync(dir, { recursive: true, force: true });
     const db = openDb(path.join(dir, 'demo.db'), { demo: true });
     const handler = createApp(db, {
-      basePath: base, demo: true, cookieName: 'sid_demo', liveLink,
+      basePath: base, demo: true, cookieName: 'sid_demo', liveLink, feedbackSink,
       uploadDir: path.join(dir, 'uploads'), timers: false,
     });
     return { db, handler };

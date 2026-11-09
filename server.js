@@ -12,6 +12,9 @@ const BASE = String(process.env.BASE_PATH || '').trim().replace(/\/+$/, '').repl
 const DEMO = process.env.DEMO_BEREICH !== '0';
 const DEMO_BASE = `${BASE}/demo`;
 
+// Rückmeldungen aus dem Demo-Bereich landen in der Hauptdatenbank (sonst gingen sie nachts mit den Demodaten verloren)
+let liveFeedback = null;
+
 const db = openDb(DB_FILE);
 const live = createApp(db, {
   basePath: BASE,
@@ -20,9 +23,11 @@ const live = createApp(db, {
   demoLink: DEMO ? `${DEMO_BASE}/` : null,
   // Anmeldung ohne Passwort gibt es für die echten Daten nur auf reinen Vorführ-Servern ohne Demo-Bereich
   demo: !DEMO && process.env.DEMO_MODUS === '1',
+  onCtx: (ctx) => { liveFeedback = (r) => ctx.rueckmeldungSpeichern(r); },
 });
 
-const sandbox = DEMO ? createDemoSandbox({ dir: path.join(path.dirname(DB_FILE), 'demo'), base: DEMO_BASE, liveLink: `${BASE}/` }) : null;
+const sandbox = DEMO ? createDemoSandbox({ dir: path.join(path.dirname(DB_FILE), 'demo'), base: DEMO_BASE, liveLink: `${BASE}/`,
+  feedbackSink: (r) => liveFeedback(r) }) : null;
 const server = express();
 server.disable('x-powered-by');
 server.use((req, res, next) => (sandbox && sandbox.matches(req.path) ? sandbox.handler(req, res, next) : live(req, res, next)));

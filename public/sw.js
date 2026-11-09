@@ -1,8 +1,8 @@
 /* Service Worker: speichert nur die Programmdateien (App-Hülle), damit die App schnell startet.
    Dienstplan- und Personaldaten (/api/...) werden NIE zwischengespeichert. */
-const CACHE = 'pep-v19';
+const CACHE = 'pep-v20';
 const SHELL = ['./', 'index.html', 'style.css', 'icon.svg', 'manifest.webmanifest',
-  'js/core.js', 'js/auth-login.js', 'js/nav.js', 'js/plan.js', 'js/dialogs.js', 'js/mitarbeiter.js', 'js/fotos.js', 'js/campus.js', 'js/personal.js', 'js/verwaltung.js', 'js/abwesenheit.js', 'js/kalender.js', 'js/tausch.js', 'js/benachrichtigungen.js', 'js/wuensche.js', 'js/zeiten.js', 'js/export.js', 'js/recht.js', 'js/passkey.js', 'js/demo.js', 'js/stempeluhr.js', 'js/personenplan.js', 'js/abschluss.js', 'js/konto.js'];
+  'js/core.js', 'js/auth-login.js', 'js/nav.js', 'js/plan.js', 'js/dialogs.js', 'js/mitarbeiter.js', 'js/fotos.js', 'js/campus.js', 'js/personal.js', 'js/verwaltung.js', 'js/abwesenheit.js', 'js/kalender.js', 'js/tausch.js', 'js/benachrichtigungen.js', 'js/wuensche.js', 'js/zeiten.js', 'js/export.js', 'js/recht.js', 'js/passkey.js', 'js/demo.js', 'js/stempeluhr.js', 'js/personenplan.js', 'js/abschluss.js', 'js/rueckmeldung.js', 'js/konto.js'];
 const API = new URL('api/', self.registration.scope).pathname;
 
 self.addEventListener('install', (e) => {

@@ -794,3 +794,23 @@ test('Monatsabschluss: Prüfliste, Sperre per Datenbank, Wiedereröffnen mit Gru
   }
   assert.equal((await mgr('POST', `/api/shifts/${s.id}/assign`, { user_id: nu2, force: true })).status, 200);
 });
+
+test('Rückmeldung: senden, Verwaltung antwortet, Mitteilung an die Person', async () => {
+  await mgr('POST', '/api/users', { username: 'rm-person', name: 'RM Person', password: 'demo12345', role: 'staff' });
+  const c = client();
+  await login(c, 'rm-person', 'demo12345');
+  assert.equal((await c('POST', '/api/rueckmeldung', { art: 'fehler', text: 'x' })).status, 400);
+  const r = await c('POST', '/api/rueckmeldung', { art: 'fehler', text: 'Beim Tausch fehlt der Name.', ansicht: 'Tauschbörse' });
+  assert.equal(r.status, 200);
+  assert.equal((await c('GET', '/api/rueckmeldungen')).data.length, 1);
+  assert.equal((await c('GET', '/api/rueckmeldungen?alle=1')).data.length, 1); // nur eigene, auch mit ?alle
+  const alle = (await mgr('GET', '/api/rueckmeldungen?alle=1')).data;
+  const e = alle.find((x) => x.id === r.data.id);
+  assert.equal(e.status, 'neu');
+  assert.equal(e.ansicht, 'Tauschbörse');
+  assert.ok((await mgr('GET', '/api/notifications')).data.items.some((n) => n.art === 'rueckmeldung'));
+  assert.equal((await c('PUT', `/api/rueckmeldungen/${e.id}`, { status: 'erledigt' })).status, 403);
+  assert.equal((await mgr('PUT', `/api/rueckmeldungen/${e.id}`, { status: 'erledigt', antwort: 'Danke, ist behoben.' })).status, 200);
+  assert.equal((await c('GET', '/api/rueckmeldungen')).data[0].antwort, 'Danke, ist behoben.');
+  assert.ok((await c('GET', '/api/notifications')).data.items.some((n) => n.titel === 'Antwort auf Ihre Rückmeldung'));
+});

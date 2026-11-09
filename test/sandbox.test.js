@@ -48,6 +48,16 @@ test('Startseite mit getrenntem Demo-Bereich: Rollen ohne Anmeldung, echte Daten
     assert.equal((await fetch(`${base}/lwl/api/demo/personen`)).status, 404);
     r = await fetch(`${base}/lwl/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'manager', password: 'manager123' }) });
     assert.equal((await r.json()).stage, 'setup');
+    // Rückmeldung aus der Demo landet in der Hauptdatenbank
+    r = await fetch(`${base}/lwl/demo/api/rueckmeldung`, { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: c }, body: JSON.stringify({ art: 'idee', text: 'Demo-Idee: Farben anpassen' }) });
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).demo, true);
+    const { DatabaseSync } = require('node:sqlite');
+    const liveDb = new DatabaseSync(path.join(dir, "p.db"));
+    const rm = liveDb.prepare("SELECT * FROM rueckmeldungen WHERE quelle = 'demo'").all();
+    liveDb.close();
+    assert.equal(rm.length, 1);
+    assert.match(rm[0].name, /\(Demo\)/);
     // getrennte Dateien
     assert.ok(fs.existsSync(path.join(dir, 'demo', 'demo.db')));
   } finally { proc.kill(); }
