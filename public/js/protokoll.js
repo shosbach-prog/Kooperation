@@ -46,14 +46,111 @@ function diktatStarten({ lokal, onText, onEnde, onFehler }) {
   return { stop: () => { aktiv = false; try { rec.stop(); } catch { onEnde(fertig); } } };
 }
 
+// ---------- Spracherkennung auf dem eigenen Server (funktioniert in jedem Browser) ----------
+let serverSpracheStatus = null;
+async function serverSpracheVerfuegbar() {
+  if (serverSpracheStatus === null || (!serverSpracheStatus.verfuegbar && Date.now() - serverSpracheStatus.at > 60000)) {
+    try { serverSpracheStatus = { ...(await api('GET', 'api/sprache/status')), at: Date.now() }; } catch { serverSpracheStatus = { verfuegbar: false, at: Date.now() }; }
+  }
+  return serverSpracheStatus.verfuegbar;
+}
+
+/** Nimmt auf, bis stop() aufgerufen wird (höchstens 2 Min.); liefert 16-kHz-Mono als Int16-PCM */
+async function serverAufnahme({ onPegel, onZeit, onAutoStop }) {
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) throw new Error('Dieser Browser kann keine Tonaufnahme machen.');
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  } catch (e) {
+    throw new Error(e.name === 'NotAllowedError' ? 'Kein Zugriff aufs Mikrofon – bitte im Browser erlauben (Schloss-Symbol neben der Adresse → Mikrofon).' : 'Mikrofon nicht verfügbar.');
+  }
+  const rec = new MediaRecorder(stream);
+  const teile = [];
+  rec.ondataavailable = (e) => { if (e.data.size) teile.push(e.data); };
+  const ac = new (window.AudioContext || window.webkitAudioContext)();
+  const an = ac.createAnalyser(); an.fftSize = 512;
+  ac.createMediaStreamSource(stream).connect(an);
+  const werte = new Uint8Array(an.fftSize);
+  const t0 = Date.now();
+  const timer = setInterval(() => {
+    an.getByteTimeDomainData(werte);
+    let max = 0; for (const v of werte) max = Math.max(max, Math.abs(v - 128));
+    onPegel(Math.min(1, max / 64));
+    onZeit(Math.floor((Date.now() - t0) / 1000));
+    if (Date.now() - t0 > 120000) onAutoStop();
+  }, 100);
+  rec.start(250);
+  return {
+    stop: () => new Promise((resolve, reject) => {
+      rec.onstop = async () => {
+        clearInterval(timer);
+        stream.getTracks().forEach((t) => t.stop());
+        try {
+          const blob = new Blob(teile, { type: rec.mimeType || 'audio/webm' });
+          const roh = await ac.decodeAudioData(await blob.arrayBuffer());
+          const off = new OfflineAudioContext(1, Math.max(1, Math.ceil(roh.duration * 16000)), 16000);
+          const src = off.createBufferSource(); src.buffer = roh; src.connect(off.destination); src.start();
+          const f32 = (await off.startRendering()).getChannelData(0);
+          const i16 = new Int16Array(f32.length);
+          for (let i = 0; i < f32.length; i++) i16[i] = Math.max(-1, Math.min(1, f32[i])) * 32767;
+          ac.close();
+          resolve(i16);
+        } catch (e) { ac.close(); reject(new Error('Die Aufnahme konnte nicht verarbeitet werden.')); }
+      };
+      rec.stop();
+    }),
+  };
+}
+
+async function serverErkennen(i16) {
+  const res = await fetch('api/sprache/erkennen', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: i16.buffer });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.error || 'Spracherkennung fehlgeschlagen.'), { code: data.code });
+  return data.text || '';
+}
+
 /** Knopf „Diktieren“ inkl. Statusanzeige; ruft onFertig(text) */
 function diktierKnopf(cloudErlaubt, onFertig, { label = '🎤 Diktieren', klein = false } = {}) {
   const box = h('div', { class: `diktat${klein ? ' klein' : ''}` });
   const anzeige = h('div', { class: 'diktat-text', 'aria-live': 'polite' });
   let lauf = null;
   const btn = h('button', { type: 'button', class: klein ? 'tiny ghost' : 'diktat-btn' }, label);
+  const fertig = () => { lauf = null; btn.disabled = false; btn.classList.remove('aktiv'); btn.textContent = label; box.classList.remove('laeuft'); };
   btn.addEventListener('click', async () => {
     if (lauf) { lauf.stop(); return; }
+    // 1. Wahl: Erkennung auf dem eigenen Server – geht in jedem Browser, Aufnahme verlässt den Server nicht
+    if (await serverSpracheVerfuegbar()) {
+      let aufnahme;
+      const pegel = h('span', { class: 'pegel' }, h('span', {}));
+      const zeit = h('span', { class: 'muted' }, '0:00');
+      try {
+        aufnahme = await serverAufnahme({
+          onPegel: (p) => { pegel.firstChild.style.width = `${Math.round(p * 100)}%`; },
+          onZeit: (sek) => { zeit.textContent = `${Math.floor(sek / 60)}:${String(sek % 60).padStart(2, '0')}`; },
+          onAutoStop: () => lauf?.stop(),
+        });
+      } catch (e) { toast(e.message, true); return; }
+      btn.classList.add('aktiv'); btn.textContent = '⏹ Fertig'; box.classList.add('laeuft');
+      anzeige.replaceChildren(h('span', { class: 'aufnahme-punkt', 'aria-hidden': 'true' }), ' Aufnahme läuft ', zeit, pegel,
+        h('div', { class: 'small muted' }, 'Erkennung auf dem Klinik-Server – die Aufnahme verlässt den Server nicht und wird nicht gespeichert.'));
+      lauf = {
+        stop: async () => {
+          lauf = { stop: () => {} };
+          btn.disabled = true; btn.textContent = '… wird erkannt';
+          anzeige.replaceChildren(h('span', { class: 'muted' }, 'Wird erkannt …'));
+          try {
+            const text = await serverErkennen(await aufnahme.stop());
+            anzeige.replaceChildren();
+            if (text.trim()) onFertig(text.trim()); else toast('Es wurde nichts verstanden – bitte noch einmal deutlich sprechen.', true);
+          } catch (e) {
+            anzeige.replaceChildren();
+            toast(e.code === 'ZU_KURZ' ? 'Die Aufnahme war zu kurz.' : e.message, true);
+          }
+          fertig();
+        },
+      };
+      return;
+    }
     const m = await sprachModus(cloudErlaubt);
     if (m.modus === 'keine') { uiAlert('Dieser Browser unterstützt keine Spracheingabe. Bitte Chrome (Android) oder Safari (iPhone) verwenden.', { title: 'Spracheingabe' }); return; }
     if (m.modus === 'gesperrt') {

@@ -25,7 +25,7 @@ const iso = (d) => d.toISOString().slice(0, 10);
 test.before(async () => {
   if (skip) return;
   ({ server, url } = await H.startServer());
-  browser = await H.playwright.chromium.launch({ args: ['--no-proxy-server'] });
+  browser = await H.playwright.chromium.launch({ args: ['--no-proxy-server', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
   mgr = await H.loginState(browser, url, 'manager', 'manager123');
   staff = await H.loginState(browser, url, 'abecker', 'demo123');
   // Dienste für die nächsten Wochen erzeugen
@@ -363,17 +363,8 @@ test('Stempeln ohne Netz: Warteschlange, Übertragung, App offline öffnen', { s
   await ctx.close();
 });
 
-test('Schichtprotokoll: Diktat (simuliert, auf dem Gerät), Vorschau, Patientendaten-Warnung, Speichern, Abzeichnen', { skip }, async () => {
+test('Schichtprotokoll: Diktat (Mikrofon → eigener Server), Vorschau, Patientendaten-Warnung, Speichern, Abzeichnen', { skip }, async () => {
   const { ctx, page, errors } = await open(DEVICES()['iPhone 13'], staff.state);
-  // Spracherkennung simulieren: liefert ein festes Diktat, „auf dem Gerät“ verfügbar
-  await ctx.addInitScript(() => {
-    class FakeSR {
-      static async available() { return 'available'; }
-      start() { setTimeout(() => { const r = [{ transcript: window.__diktat || '' }]; r.isFinal = true; this.onresult({ resultIndex: 0, results: [r] }); }, 50); }
-      stop() { setTimeout(() => this.onend && this.onend(), 10); }
-    }
-    window.SpeechRecognition = FakeSR;
-  });
   // eigener Dienst von gestern
   const m = await browser.newContext({ storageState: mgr.state });
   const api = async (method, u, data) => (await m.request.fetch(`${url}${u}`, { method, data })).json();
@@ -390,10 +381,11 @@ test('Schichtprotokoll: Diktat (simuliert, auf dem Gerät), Vorschau, Patientend
   await page.waitForSelector('.diktat-btn');
   assert.deepEqual(await H.axe(page), []);
   assert.deepEqual(await H.layoutProblems(page), []);
-  await page.evaluate(() => { window.__diktat = 'Belegung 18. Zwei Zugänge, eine Entlassung. Sturz um 14 Uhr, keine Verletzung. Aufzug defekt'; });
+  H.spracheText.wert = 'Belegung 18. Zwei Zugänge, eine Entlassung. Sturz um 14 Uhr, keine Verletzung. Aufzug defekt';
   await page.click('.diktat-btn');
-  await page.waitForTimeout(200);
-  await page.click('.diktat-btn'); // „Fertig“
+  await page.waitForSelector('.aufnahme-punkt'); // Aufnahme läuft (simuliertes Mikrofon)
+  await page.waitForTimeout(1200);
+  await page.click('.diktat-btn'); // „Fertig“ → Aufnahme wird umgewandelt und an den Server geschickt
   await page.waitForSelector('.diktat-vorschau:not([hidden])');
   assert.match(await page.textContent('.diktat-vorschau'), /Belegung: 18/);
   assert.match(await page.textContent('.diktat-vorschau'), /Sturz um 14:00/);

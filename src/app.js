@@ -1686,7 +1686,7 @@ function createApp(db, opts = {}) {
   const ctx = {
     db, T, TOTP, HttpError, auth, manager, wrap, audit, getSettings, isoDate, isTime, nowLocalMs, todayIso,
     hasMgr, isHaupt, publicUser, loadShifts, loadRules, qualMissing, verbundGroup, checkConflicts, absenceOn, uploadDir, express,
-    hooks, shiftLabel, managerIds, decorateAbsence, timers: opts.timers !== false, backupDir: opts.backupDir || null, startSession, checkLock, registerFail, resetFails, demo: demoMode, hashPassword, qualKann: vertretung, feedbackSink: opts.feedbackSink || null, basePath: base, oidc: opts.oidc || null, clock: opts.clock || (() => Date.now()),
+    hooks, shiftLabel, managerIds, decorateAbsence, timers: opts.timers !== false, backupDir: opts.backupDir || null, startSession, checkLock, registerFail, resetFails, demo: demoMode, hashPassword, qualKann: vertretung, feedbackSink: opts.feedbackSink || null, basePath: base, oidc: opts.oidc || null, spracheTest: opts.sprache || null, clock: opts.clock || (() => Date.now()),
     scopeOf, inScope, userInScope, requireUnit, requireUser, managerFull, arbzgCheck, report,
   };
   for (const name of fs.readdirSync(path.join(__dirname, 'routes')).filter((f) => f.endsWith('.js')).sort()) {

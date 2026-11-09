@@ -174,6 +174,7 @@ async function renderSettings() {
     ['loeschfrist_mitteilungen_tage', 'Mitteilungen löschen nach … Tagen', 'number', '0 = nie'],
     ['vorkommnis_arten', 'Schichtprotokoll: Arten besonderer Vorkommnisse (eine pro Zeile)', 'list', 'Nur Arten ohne Patientenbezug; erscheinen in der Auswahl und in der Auswertung.'],
     ['loeschfrist_schichtprotokoll_monate', 'Schichtprotokolle löschen nach … Monaten', 'number', 'mit Datenschutz/Personalrat abstimmen; 0 = nie'],
+    ['sprache_server', 'Spracherkennung auf dem eigenen Server (empfohlen)', 'checkbox', 'Whisper (Open Source) läuft auf diesem Server; Aufnahmen werden nur im Arbeitsspeicher verarbeitet und nicht gespeichert. Funktioniert in jedem Browser.'],
     ['sprache_cloud_erlaubt', 'Spracheingabe über Cloud-Dienste erlauben', 'checkbox', 'Standard: aus. Dann nur Spracherkennung direkt auf dem Gerät (aktuelles Chrome). Bei „an“ wird die Aufnahme zur Erkennung an Google bzw. Apple übertragen – nur nach Freigabe durch den Datenschutz.'],
     ['impressum_text', 'Impressum (Klartext)', 'textarea', 'Anbieterkennzeichnung nach § 5 DDG: Name, Anschrift, Vertretungsberechtigte, Kontakt.'],
     ['datenschutz_text', 'Datenschutzhinweise (Klartext; leer = Muster anzeigen)', 'textarea', 'Absätze durch Leerzeile trennen; eine kurze erste Zeile ohne Punkt wird zur Überschrift.'],

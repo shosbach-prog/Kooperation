@@ -24,7 +24,8 @@
     Polizeieinsatz: ['polizei'],
     Entweichung: ['entweichung', 'entwichen', 'abgängig', 'weggelaufen'],
     Selbstverletzung: ['selbstverletzung', 'selbstverletzend', 'selbst verletzt'],
-    'Technische Störung': ['störung', 'defekt', 'kaputt', 'ausgefallen', 'funktioniert nicht', 'stromausfall', 'netzwerk', 'edv'],
+    // „~“ = darf auch mitten im Wort stehen (Zugdefekt, Netzwerkstörung)
+    'Technische Störung': ['~störung', '~defekt', 'kaputt', 'ausgefallen', 'funktioniert nicht', 'stromausfall', 'netzwerk', 'edv'],
     Personalausfall: ['personalausfall', 'krankgemeldet', 'krank gemeldet', 'ausgefallen ist', 'nicht zum dienst', 'fehlt heute'],
   };
 
@@ -71,15 +72,15 @@
       for (const art of arten) {
         const keys = SYNONYME[art] || [art.toLowerCase().split(/[\s/]+/)[0]];
         for (const k of keys) {
-          const kk = k.trim();
-          const m = new RegExp(`(?:^|[\\s,.(\\-])${kk.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i').exec(s);
+          const kk = k.trim().replace(/^~/, '');
+          const m = k.startsWith('~') ? (() => { const i = s.indexOf(kk); return i < 0 ? null : { index: i - 1 }; })() : new RegExp(`(?:^|[\\s,.(\\-])${kk.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i').exec(s);
           // zuerst genanntes Stichwort entscheidet, bei gleicher Stelle das längere
           if (m && (!beste || m.index < beste.pos || (m.index === beste.pos && kk.length > beste.len))) beste = { art, keys, len: kk.length, pos: m.index };
         }
       }
       for (const { art, keys } of beste ? [beste] : []) {
-        const n = anzahlZu(satz, keys.map((k) => k.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-        const notiz = satz.replace(new RegExp(`^.*?(?:${keys.map((k) => k.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})[a-zäöüß]*`, 'i'), '')
+        const n = anzahlZu(satz, keys.map((k) => k.trim().replace(/^~/, "").replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+        const notiz = satz.replace(new RegExp(`^.*?(?:${keys.map((k) => k.trim().replace(/^~/, "").replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})[a-zäöüß]*`, 'i'), '')
           .replace(/\b(?:um|gegen)\s*\d{1,2}(?:[:.]\d{2})?\s*(?:uhr)?(?:\s*\d{1,2})?/i, '').replace(/^[\s,:–-]+|[\s,:–-]+$/g, '');
         const sauber = notiz.replace(/\s+,/g, ',').replace(/^[\s,]+/, '');
         // Rest nach dem Stichwort als Notiz; steht das Wichtige davor („Aufzug ausgefallen“), den ganzen Satz (ohne Uhrzeit) nehmen

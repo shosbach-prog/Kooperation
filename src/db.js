@@ -56,6 +56,8 @@ const DEFAULT_SETTINGS = {
   vorkommnis_arten: ['Notfall/Reanimation', 'Sturz', 'Aggressionsereignis', 'Selbstverletzung', 'Polizeieinsatz', 'Entweichung', 'Technische Störung', 'Personalausfall'],
   loeschfrist_schichtprotokoll_monate: 36,
   sprache_cloud_erlaubt: false,
+  // Spracherkennung auf dem eigenen Server (Whisper) – keine Aufnahme verlässt den Server
+  sprache_server: true,
   impressum_text: '',
   datenschutz_text: '',
   // Lohnart-Nummern für die Übergabe an die Entgeltabrechnung (Schlüssel=Nummer); bitte mit der Personalabteilung abstimmen

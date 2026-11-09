@@ -14,6 +14,7 @@ const DEMO_BASE = `${BASE}/demo`;
 
 // Rückmeldungen aus dem Demo-Bereich landen in der Hauptdatenbank (sonst gingen sie nachts mit den Demodaten verloren)
 let liveFeedback = null;
+let liveSprache = null;
 
 const db = openDb(DB_FILE);
 const live = createApp(db, {
@@ -23,7 +24,7 @@ const live = createApp(db, {
   demoLink: DEMO ? `${DEMO_BASE}/` : null,
   // Anmeldung ohne Passwort gibt es für die echten Daten nur auf reinen Vorführ-Servern ohne Demo-Bereich
   demo: !DEMO && process.env.DEMO_MODUS === '1',
-  onCtx: (ctx) => { liveFeedback = (r) => ctx.rueckmeldungSpeichern(r); },
+  onCtx: (ctx) => { liveFeedback = (r) => ctx.rueckmeldungSpeichern(r); liveSprache = ctx.spracheVorladen; },
 });
 
 const sandbox = DEMO ? createDemoSandbox({ dir: path.join(path.dirname(DB_FILE), 'demo'), base: DEMO_BASE, liveLink: `${BASE}/`,
@@ -42,6 +43,8 @@ server.get('/.well-known/assetlinks.json', (_req, res) => {
 server.use((req, res, next) => (sandbox && sandbox.matches(req.path) ? sandbox.handler(req, res, next) : live(req, res, next)));
 
 server.listen(PORT, () => {
+  // Sprachmodell im Hintergrund laden, damit die erste Spracheingabe nicht warten muss
+  if (process.env.SPRACHE !== '0') liveSprache?.();
   console.log(`Personaleinsatzplanung läuft auf http://localhost:${PORT}${BASE}/`);
   if (!sandbox) return;
   const origin = `http://127.0.0.1:${PORT}`;
