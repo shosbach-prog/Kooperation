@@ -180,6 +180,7 @@ function absLabel(a) {
 
 function renderCell(s, staffUsers, compact = false) {
   if (!s) return h('div', { class: 'cell none' }, '–');
+  if (s.gesperrt) return gesperrteZelle(s);
   const n = s.assigned.length;
   const full = s.max_staff !== null && n >= s.max_staff;
   const cls = s.unterbesetzt ? 'bad' : s.ausgeglichen ? 'covered' : full ? 'full' : 'ok';
@@ -361,4 +362,12 @@ function personGruppen(free, s) {
   for (const u of rest) { const q = u.qualification || 'ohne Qualifikation'; if (!byQ.has(q)) byQ.set(q, []); byQ.get(q).push(u); }
   for (const [q, us] of byQ) gruppen.push([stamm.length ? `Weitere: ${q}` : q, us]);
   return gruppen;
+}
+
+/** Dienst in einem abgeschlossenen Monat: nur anzeigen */
+function gesperrteZelle(s) {
+  const cls = s.unterbesetzt ? 'bad' : s.ausgeglichen ? 'covered' : 'ok';
+  return h('div', { class: `cell ${cls} gesperrt`, title: 'Monat abgeschlossen – keine Änderungen möglich' },
+    h('div', { class: 'count' }, h('span', {}, `${s.assigned.length} · min ${s.min_staff}`), h('span', { 'aria-label': 'abgeschlossen' }, '🔒')),
+    h('ul', {}, s.assigned.map((a) => h('li', { class: a.user_id === state.me.id ? 'me' : '' }, h('span', { class: 'person' }, avatar(a, 20), h('span', {}, a.name))))));
 }

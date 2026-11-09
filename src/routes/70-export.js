@@ -47,7 +47,8 @@ module.exports = (app, ctx) => {
       }
     }
     const fehlend = r.rows.filter((x) => !users[x.user_id]).map((x) => x.name);
-    return { month, lines, fehlend, unterschiede: r.rows.filter((x) => !x.ist_erfasst && x.dienste).length };
+    return { month, lines, fehlend, unterschiede: r.rows.filter((x) => !x.ist_erfasst && x.dienste).length,
+      abgeschlossen: ctx.monatKomplett ? ctx.monatKomplett(month) : false };
   };
 
   app.get('/api/export/lohn', auth, managerFull, wrap((req) => lohn(req.query.month)));
@@ -59,7 +60,7 @@ module.exports = (app, ctx) => {
     const rows = [head, ...l.lines.map((x) => [x.personalnummer, x.name, x.monat, x.lohnart, x.bezeichnung, num(x.menge), x.einheit, num(x.betrag)])];
     audit(req.user.id, 'export.lohn', { month: l.month, zeilen: l.lines.length });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="lohn-${l.month}.csv"`);
+    res.setHeader('Content-Disposition', `attachment; filename="lohn-${l.month}${l.abgeschlossen ? '' : '-vorlaeufig'}.csv"`);
     res.send('﻿' + rows.map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n'));
   }));
 

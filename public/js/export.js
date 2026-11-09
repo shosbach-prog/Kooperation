@@ -33,7 +33,8 @@ async function exportCard() {
     if (l) {
       hint = h('div', {},
         h('p', { class: 'small muted' }, `${l.lines.length} Buchungszeilen je Personalnummer und Lohnart. Die Lohnart-Nummern stellen Sie unter Einstellungen ein (mit der Entgeltabrechnung abstimmen).`),
-        l.fehlend.length ? h('p', { class: 'small' }, h('span', { class: 'badge warn' }, 'Personalnummer fehlt'), ' ', l.fehlend.join(', ')) : null);
+        l.fehlend.length ? h('p', { class: 'small' }, h('span', { class: 'badge warn' }, 'Personalnummer fehlt'), ' ', l.fehlend.join(', ')) : null,
+        !l.abgeschlossen ? h('p', { class: 'small' }, h('span', { class: 'badge warn' }, 'vorläufig'), ' Der Monat ist noch nicht für alle Stationen abgeschlossen.') : null);
     }
   }
   return h('div', { class: 'card' }, h('h2', {}, 'Exporte'), h('div', { class: 'toolbar' }, items), hint);

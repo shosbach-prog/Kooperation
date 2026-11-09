@@ -62,7 +62,7 @@ function zeitenTable(list, { withName, rerender }) {
         z.ist_note ? h('div', { class: 'small muted' }, z.ist_note) : null,
         z.ist_by_name && z.ist_by_name !== z.name ? h('div', { class: 'small muted' }, `erfasst von ${z.ist_by_name}`) : null),
       h('td', {}, zeitDiff(z)),
-      h('td', { class: 'actions' },
+      z.gesperrt ? h('td', { class: 'actions' }, h('span', { class: 'badge', title: 'Monat abgeschlossen' }, '🔒 abgeschlossen')) : h('td', { class: 'actions' },
         !zeitIst(z) ? h('button', { class: 'tiny', onclick: async () => { if (await zeitWieGeplant(z)) rerender(); } }, '✓ wie geplant') : null,
         h('button', { class: 'tiny ghost', onclick: async () => { if (await editZeit(z)) rerender(); } }, zeitIst(z) ? 'Ändern' : 'Abweichend'),
         zeitIst(z) && withName ? h('button', { class: 'tiny ghost', onclick: async () => {

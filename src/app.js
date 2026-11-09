@@ -940,6 +940,7 @@ function createApp(db, opts = {}) {
 
   const loadShifts = (where, params) => {
     const shifts = db.prepare(`SELECT s.*, st.name AS type_name, st.code AS type_code, st.color AS type_color, st.art, st.bewertung, u.name AS unit_name,
+        EXISTS (SELECT 1 FROM monatsabschluss ma WHERE ma.unit_id = s.unit_id AND ma.monat = substr(s.date, 1, 7)) AS gesperrt,
         CASE WHEN v.id IS NULL THEN NULL ELSE u.verbund_id END AS verbund_id, v.name AS verbund_name, v.gemeinsam AS verbund_gemeinsam
       FROM shifts s JOIN shift_types st ON st.id = s.shift_type_id JOIN units u ON u.id = s.unit_id
       LEFT JOIN verbuende v ON v.id = u.verbund_id AND v.active = 1
@@ -1683,6 +1684,9 @@ function createApp(db, opts = {}) {
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Unbekannter Endpunkt.')));
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => {
+    if (/MONAT_ABGESCHLOSSEN/.test(err.message || '')) {
+      return res.status(409).json({ error: 'Dieser Monat ist für die Station abgeschlossen. Änderungen sind erst nach einer Wiedereröffnung durch die Hauptverwaltung möglich.', code: 'ABGESCHLOSSEN' });
+    }
     const status = err.status || (err.type === 'entity.parse.failed' ? 400 : 500);
     if (status >= 500) console.error(err);
     res.status(status).json({ error: status >= 500 ? 'Interner Fehler.' : err.message, code: err.code });

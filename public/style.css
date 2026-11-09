@@ -598,3 +598,4 @@ table.pp-table tr.pp-group th { position: static; }
 .pp-inhalt { display: contents; }
 .pp-btn { position: relative; } /* hält den unsichtbaren Screenreader-Text innerhalb der Tabelle */
 .wish-day { position: relative; }
+.cell.gesperrt { opacity: .9; }

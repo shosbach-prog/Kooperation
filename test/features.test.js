@@ -751,3 +751,46 @@ test('Qualifikation vertritt: Pflegefachkraft zählt als Pflegehilfskraft, aber 
     await mgr('PUT', '/api/settings', { qualifikation_vertretung: ['Pflegefachkraft > Pflegehilfskraft', 'Stationsleitung > Pflegefachkraft'] });
   }
 });
+
+test('Monatsabschluss: Prüfliste, Sperre per Datenbank, Wiedereröffnen mit Grund', async () => {
+  const now = new Date();
+  const vm = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15)).toISOString().slice(0, 10); // 15. des Vormonats
+  const month = vm.slice(0, 7);
+  const s = await shiftOn(vm, 'F', 'Station 1');
+  const nu = (await mgr('POST', '/api/users', { username: 'abschluss1', name: 'Abschluss Test', password: 'demo12345', role: 'staff', stammbereich_id: s.unit_id })).data.id;
+  const nu2 = (await mgr('POST', '/api/users', { username: 'abschluss2', name: 'Abschluss Zwei', password: 'demo12345', role: 'staff', stammbereich_id: s.unit_id })).data.id;
+  await mgr('POST', `/api/shifts/${s.id}/assign`, { user_id: nu, force: true });
+  // Prüfliste zeigt die nicht bestätigte Zeit
+  let d = (await mgr('GET', `/api/monatsabschluss?month=${month}`)).data;
+  assert.equal(d.abschliessbar, true);
+  const st = d.stationen.find((x) => x.unit_id === s.unit_id);
+  assert.ok(st.pruefung.zeiten_offen >= 1);
+  // laufender Monat kann nicht abgeschlossen werden
+  assert.equal((await mgr('POST', '/api/monatsabschluss', { month: now.toISOString().slice(0, 7), unit_ids: [s.unit_id] })).status, 400);
+  // Mitarbeitende dürfen nicht abschließen
+  const ma = client();
+  await login(ma, 'abschluss2', 'demo12345');
+  assert.equal((await ma('POST', '/api/monatsabschluss', { month, unit_ids: [s.unit_id] })).status, 403);
+  assert.equal((await mgr('POST', '/api/monatsabschluss', { month, unit_ids: [s.unit_id] })).status, 200);
+  try {
+    // gesperrt: Eintragen, Austragen, Ist-Zeit, Abwesenheit, Schicht ändern
+    let r = await mgr('POST', `/api/shifts/${s.id}/assign`, { user_id: nu2, force: true });
+    assert.equal(r.status, 409); assert.equal(r.data.code, 'ABGESCHLOSSEN');
+    assert.equal((await mgr('DELETE', `/api/shifts/${s.id}/assign?user_id=${nu}`, { reason: 'Test' })).data.code, 'ABGESCHLOSSEN');
+    assert.equal((await mgr('PUT', `/api/zeiten/${s.id}`, { user_id: nu, ist_start: s.start_time, ist_end: s.end_time })).data.code, 'ABGESCHLOSSEN');
+    assert.equal((await mgr('POST', '/api/absences', { user_id: nu2, type: 'krank', from: vm, to: vm })).data.code, 'ABGESCHLOSSEN');
+    assert.equal((await mgr('PUT', `/api/shifts/${s.id}`, { min_staff: 1, note: 'x' })).data.code, 'ABGESCHLOSSEN');
+    // Anzeige: Schicht gesperrt, Station abgeschlossen
+    const plan = (await mgr('GET', `/api/plan?from=${vm}&to=${vm}`)).data.shifts.find((x) => x.id === s.id);
+    assert.ok(plan.gesperrt);
+    d = (await mgr('GET', `/api/monatsabschluss?month=${month}`)).data;
+    assert.ok(d.stationen.find((x) => x.unit_id === s.unit_id).abgeschlossen);
+    // Lohn-Export vorläufig, solange nicht alle Stationen abgeschlossen sind
+    assert.equal((await mgr('GET', `/api/export/lohn?month=${month}`)).data.abgeschlossen, false);
+    // Wiedereröffnen nur mit Grund
+    assert.equal((await mgr('DELETE', `/api/monatsabschluss?month=${month}&unit_id=${s.unit_id}`, {})).data.code, 'BEGRUENDUNG');
+  } finally {
+    assert.equal((await mgr('DELETE', `/api/monatsabschluss?month=${month}&unit_id=${s.unit_id}`, { grund: 'Nachtrag Test' })).status, 200);
+  }
+  assert.equal((await mgr('POST', `/api/shifts/${s.id}/assign`, { user_id: nu2, force: true })).status, 200);
+});

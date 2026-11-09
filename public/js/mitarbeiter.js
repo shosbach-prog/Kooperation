@@ -72,10 +72,10 @@ function zuschlagTable(rows, withName) {
 
 // ---------- Auswertung (Manager) ----------
 async function renderReport() {
-  const [r, exp, units] = await Promise.all([api('GET', `api/report?month=${state.month}`), exportCard(), api('GET', 'api/units')]);
+  const [r, exp, units, abschluss] = await Promise.all([api('GET', `api/report?month=${state.month}`), exportCard(), api('GET', 'api/units'), abschlussCard()]);
   const lf = listenFilter('report', units, renderReport);
   const rows = r.rows.filter((x) => lf.passt(x.name, x.stammbereich_id));
-  setMain(exp, h('div', { class: 'card' },
+  setMain(abschluss, exp, h('div', { class: 'card' },
     h('div', { class: 'toolbar' },
       h('label', {}, 'Monat', h('input', { type: 'month', value: state.month, onchange: (e) => { state.month = e.target.value; renderReport(); } })),
       ...lf.leiste,

@@ -189,7 +189,8 @@ async function renderPersonenplan() {
 /** Dialog für eine Person an einem Tag: eigene Dienste austragen/umsetzen, offene Dienste eintragen */
 async function personTag(p, d, shifts) {
   const own = shifts.filter((s) => s.date === d && s.assigned.some((a) => a.user_id === p.id));
-  const andere = shifts.filter((s) => s.date === d && !s.assigned.some((a) => a.user_id === p.id))
+  const gesperrt = own.some((s) => s.gesperrt) || shifts.some((s) => s.date === d && s.gesperrt);
+  const andere = shifts.filter((s) => s.date === d && !s.gesperrt && !s.assigned.some((a) => a.user_id === p.id))
     .filter((s) => isMgr() ? canManageUnit(s.unit_id) : (s.max_staff === null || s.assigned.length < s.max_staff))
     .sort((a, b) => Number(b.unterbesetzt) - Number(a.unterbesetzt) || a.start_time.localeCompare(b.start_time));
   const ab = (state.planAbsences || []).find((a) => a.user_id === p.id && d >= a.from_date && d <= a.to_date);
@@ -199,9 +200,10 @@ async function personTag(p, d, shifts) {
   await openDialog((close) => h('div', { class: 'ui-dialog-body' },
     h('h2', {}, `${p.name} · ${WD[weekday(d)]} ${fmtDate(d)}`),
     ab ? h('p', {}, h('span', { class: 'badge warn' }, absLabel(ab))) : null,
+    gesperrt ? h('p', { class: 'small muted' }, '🔒 Der Monat ist für diese Station abgeschlossen.') : null,
     w && isMgr() ? h('p', { class: 'small' }, w.art === 'frei' ? '♡ möchte an diesem Tag frei haben' : `★ Wunschdienst: ${w.type_name}`, w.note ? ` (${w.note})` : '') : null,
     own.length ? h('div', {}, h('h3', {}, 'Eingeteilt'), h('ul', { class: 'pp-dlg-list' }, own.map((s) => h('li', {}, dienstZeile(s),
-      h('span', { class: 'actions' },
+      s.gesperrt ? h('span', { class: 'badge' }, '🔒 abgeschlossen') : h('span', { class: 'actions' },
         s.verbund?.partner?.length && (canManageUnit(s.unit_id) || selbst) ? h('button', { class: 'tiny ghost', onclick: () => { close(); moveShift(s, { user_id: p.id, name: p.name }); } }, '⇄ Umsetzen') : null,
         canManageUnit(s.unit_id) || selbst ? h('button', { class: 'tiny danger', onclick: () => { close(); unassign(s, p.id, selbst ? undefined : p.name); } }, 'Austragen') : null))))) : null,
     !ab && andere.length ? h('div', {}, h('h3', {}, own.length ? 'Zusätzlich eintragen' : 'Eintragen in'), h('ul', { class: 'pp-dlg-list' }, andere.map((s) => h('li', {}, dienstZeile(s),

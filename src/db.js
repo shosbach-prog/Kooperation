@@ -305,6 +305,45 @@ CREATE TABLE IF NOT EXISTS audit_log (
   action TEXT NOT NULL,
   details TEXT
 );
+
+-- Monatsabschluss je Station: danach sind Dienste, Ist-Zeiten und Abwesenheiten dieses Monats gesperrt
+CREATE TABLE IF NOT EXISTS monatsabschluss (
+  monat TEXT NOT NULL,
+  unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+  abgeschlossen_von INTEGER,
+  abgeschlossen_am TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (monat, unit_id)
+);
+CREATE TRIGGER IF NOT EXISTS sperre_asg_ins BEFORE INSERT ON assignments
+  WHEN EXISTS (SELECT 1 FROM shifts s JOIN monatsabschluss m ON m.unit_id = s.unit_id AND m.monat = substr(s.date, 1, 7) WHERE s.id = NEW.shift_id)
+  BEGIN SELECT RAISE(ABORT, 'MONAT_ABGESCHLOSSEN'); END;
+CREATE TRIGGER IF NOT EXISTS sperre_asg_del BEFORE DELETE ON assignments
+  WHEN EXISTS (SELECT 1 FROM shifts s JOIN monatsabschluss m ON m.unit_id = s.unit_id AND m.monat = substr(s.date, 1, 7) WHERE s.id = OLD.shift_id)
+  BEGIN SELECT RAISE(ABORT, 'MONAT_ABGESCHLOSSEN'); END;
+CREATE TRIGGER IF NOT EXISTS sperre_asg_upd BEFORE UPDATE ON assignments
+  WHEN EXISTS (SELECT 1 FROM shifts s JOIN monatsabschluss m ON m.unit_id = s.unit_id AND m.monat = substr(s.date, 1, 7) WHERE s.id IN (OLD.shift_id, NEW.shift_id))
+  BEGIN SELECT RAISE(ABORT, 'MONAT_ABGESCHLOSSEN'); END;
+CREATE TRIGGER IF NOT EXISTS sperre_shift_ins BEFORE INSERT ON shifts
+  WHEN EXISTS (SELECT 1 FROM monatsabschluss m WHERE m.unit_id = NEW.unit_id AND m.monat = substr(NEW.date, 1, 7))
+  BEGIN SELECT RAISE(ABORT, 'MONAT_ABGESCHLOSSEN'); END;
+CREATE TRIGGER IF NOT EXISTS sperre_shift_upd BEFORE UPDATE ON shifts
+  WHEN EXISTS (SELECT 1 FROM monatsabschluss m WHERE (m.unit_id = OLD.unit_id AND m.monat = substr(OLD.date, 1, 7)) OR (m.unit_id = NEW.unit_id AND m.monat = substr(NEW.date, 1, 7)))
+  BEGIN SELECT RAISE(ABORT, 'MONAT_ABGESCHLOSSEN'); END;
+CREATE TRIGGER IF NOT EXISTS sperre_shift_del BEFORE DELETE ON shifts
+  WHEN EXISTS (SELECT 1 FROM monatsabschluss m WHERE m.unit_id = OLD.unit_id AND m.monat = substr(OLD.date, 1, 7))
+  BEGIN SELECT RAISE(ABORT, 'MONAT_ABGESCHLOSSEN'); END;
+CREATE TRIGGER IF NOT EXISTS sperre_abs_ins BEFORE INSERT ON absences
+  WHEN EXISTS (SELECT 1 FROM monatsabschluss m WHERE m.unit_id = (SELECT stammbereich_id FROM users WHERE id = NEW.user_id)
+    AND m.monat BETWEEN substr(NEW.from_date, 1, 7) AND substr(NEW.to_date, 1, 7))
+  BEGIN SELECT RAISE(ABORT, 'MONAT_ABGESCHLOSSEN'); END;
+CREATE TRIGGER IF NOT EXISTS sperre_abs_upd BEFORE UPDATE ON absences
+  WHEN EXISTS (SELECT 1 FROM monatsabschluss m WHERE m.unit_id = (SELECT stammbereich_id FROM users WHERE id = OLD.user_id)
+    AND (m.monat BETWEEN substr(OLD.from_date, 1, 7) AND substr(OLD.to_date, 1, 7) OR m.monat BETWEEN substr(NEW.from_date, 1, 7) AND substr(NEW.to_date, 1, 7)))
+  BEGIN SELECT RAISE(ABORT, 'MONAT_ABGESCHLOSSEN'); END;
+CREATE TRIGGER IF NOT EXISTS sperre_abs_del BEFORE DELETE ON absences
+  WHEN EXISTS (SELECT 1 FROM monatsabschluss m WHERE m.unit_id = (SELECT stammbereich_id FROM users WHERE id = OLD.user_id)
+    AND m.monat BETWEEN substr(OLD.from_date, 1, 7) AND substr(OLD.to_date, 1, 7))
+  BEGIN SELECT RAISE(ABORT, 'MONAT_ABGESCHLOSSEN'); END;
 `;
 
 function seed(db, withDemo) {

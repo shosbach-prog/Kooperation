@@ -8,7 +8,8 @@ module.exports = (app, ctx) => {
 
   const rows = (where, params) => db.prepare(`SELECT a.shift_id, a.user_id, a.ist_start, a.ist_end, a.ist_pause, a.ist_note, a.ist_at, a.einsatz_std, a.ist_raucher_min, a.ist_quelle,
       s.date, s.start_time, s.end_time, s.break_min, s.unit_id, st.code AS type_code, st.name AS type_name, st.color AS type_color, st.art, st.bewertung,
-      un.name AS unit_name, u.name, ib.name AS ist_by_name
+      un.name AS unit_name, u.name, ib.name AS ist_by_name,
+      EXISTS (SELECT 1 FROM monatsabschluss ma WHERE ma.unit_id = s.unit_id AND ma.monat = substr(s.date, 1, 7)) AS gesperrt
     FROM assignments a JOIN shifts s ON s.id = a.shift_id JOIN shift_types st ON st.id = s.shift_type_id JOIN units un ON un.id = s.unit_id
     JOIN users u ON u.id = a.user_id LEFT JOIN users ib ON ib.id = a.ist_by
     WHERE ${where} ORDER BY s.date DESC, s.start_time, u.name`).all(...params).map((r) => {
