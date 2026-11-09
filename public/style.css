@@ -533,3 +533,68 @@ button.stempel-btn:disabled { opacity: .5; }
 .stempel-vergessen p { margin: 0 0 .5rem; }
 button.linkish { background: none; border: 0; color: var(--primary); text-decoration: underline; padding: .3rem; min-height: 32px; justify-self: center; font-weight: 400; }
 .zeit-stempel { margin: .25rem 0 0; padding: 0; list-style: none; font-size: .8rem; color: var(--muted); }
+
+/* Personenansicht des Dienstplans */
+.segmented { display: inline-flex; border: 1px solid var(--primary); border-radius: var(--radius-sm); overflow: hidden; }
+.segmented button { border: 0; border-radius: 0; min-height: 36px; }
+.segmented button.ghost { background: var(--card); }
+.phone-plan > .segmented { width: 100%; margin-bottom: .5rem; }
+.phone-plan > .segmented button { flex: 1; }
+.pp .toolbar input[type=search] { width: 12rem; max-width: 100%; }
+.pp-legend .pp-abs { display: inline-block; }
+.pp-scroll { max-height: calc(100vh - 230px); }
+table.pp-table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; }
+table.pp-table th, table.pp-table td { border-bottom: 1px solid var(--line); padding: 0; text-align: center; }
+table.pp-table thead th { position: sticky; top: 0; z-index: 2; background: var(--card); font-size: .78rem; padding: .25rem .1rem; }
+table.pp-table .pp-day span { display: block; line-height: 1.15; }
+table.pp-table .pp-name { position: sticky; left: 0; z-index: 1; background: var(--card); text-align: left; padding: .2rem .5rem .2rem .3rem; min-width: 11rem; max-width: 14rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; border-right: 1px solid var(--line); }
+table.pp-table thead .pp-name { z-index: 3; }
+table.pp-table .pp-name .avatar { vertical-align: middle; margin-right: .35rem; }
+table.pp-table tr.pp-me th, table.pp-table tr.pp-me td { background: color-mix(in srgb, var(--primary) 7%, var(--card)); }
+table.pp-table tr.pp-group th { text-align: left; font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: .5rem .4rem .2rem; background: var(--bg); position: sticky; left: 0; }
+.pp-cell { min-width: 2.6rem; height: 2.4rem; }
+.pp-monat .pp-cell { min-width: 2.2rem; }
+.pp-cell.weekend { background: color-mix(in srgb, var(--muted) 7%, var(--card)); }
+.pp-cell.holiday { background: color-mix(in srgb, var(--warn) 10%, var(--card)); }
+.pp-cell.today, th.pp-day.today { box-shadow: inset 2px 0 0 var(--primary), inset -2px 0 0 var(--primary); }
+.pp-btn { display: flex; flex-wrap: wrap; gap: 2px; align-items: center; justify-content: center; width: 100%; min-height: 2.4rem; padding: 2px; background: transparent; border: 0; color: inherit; font: inherit; border-radius: 0; }
+button.pp-btn:hover, button.pp-btn:focus-visible { background: color-mix(in srgb, var(--primary) 12%, transparent); filter: none; }
+.pp-code { display: inline-flex; align-items: baseline; padding: .05rem .3rem; border-radius: 4px; color: #fff; font-weight: 700; font-size: .78rem; text-shadow: 0 0 2px rgba(0,0,0,.35); }
+.pp-code sup { font-size: .6rem; margin-left: 1px; }
+.pp-abs { padding: .05rem .3rem; border-radius: 4px; font-weight: 700; font-size: .75rem; background: var(--warn-bg); color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); }
+.pp-abs.beantragt { border-style: dashed; }
+.pp-wish { font-size: .75rem; color: var(--muted); }
+.pp-leer { color: var(--line); }
+.pp-std { padding: 0 .5rem !important; font-variant-numeric: tabular-nums; }
+tr.pp-cover td.bad, .pp-bad { color: var(--bad); font-weight: 700; }
+tr.pp-cover td.bad { background: var(--bad-bg); }
+tr.pp-cover td.ok, .pp-ok { color: var(--ok); }
+tr.pp-cover th { font-size: .8rem; }
+.pp-dlg-list { list-style: none; padding: 0; margin: .3rem 0; display: grid; gap: .4rem; }
+.pp-dlg-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .4rem; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: .45rem .55rem; }
+@media print { .pp-scroll { max-height: none; overflow: visible; } }
+.pp-toolbar { flex-wrap: wrap; }
+.pp-nav { display: inline-flex; align-items: center; gap: .4rem; flex-wrap: nowrap; }
+.pp-nav strong { white-space: nowrap; }
+.pp-filter > summary { cursor: pointer; font-weight: 600; padding: .35rem 0; min-height: 32px; display: flex; align-items: center; gap: .5rem; }
+.pp-filter[open] > summary { display: none; }
+table.pp-table .pp-name { text-transform: none; letter-spacing: normal; font-size: .88rem; color: var(--text); }
+table.pp-table thead .pp-name { font-size: .78rem; color: var(--muted); }
+@media (min-width: 760px) { .pp-filter > summary { display: none; } }
+@media (max-width: 759.98px) {
+  .pp-toolbar { gap: .4rem; }
+  .pp-toolbar .segmented { width: 100%; }
+  .pp-toolbar .segmented button { flex: 1; }
+  .pp-nav { flex: 1; justify-content: space-between; }
+  .pp-nav button { min-width: 44px; }
+  .pp-filter[open] > summary { display: flex; }
+  table.pp-table .pp-name { min-width: 7.5rem; max-width: 8.5rem; font-size: .82rem; padding-left: .2rem; }
+  table.pp-table .pp-name .avatar { display: none; }
+  .pp-scroll { max-height: none; }
+}
+.pp-group-label { position: sticky; left: .4rem; display: inline-block; }
+table.pp-table tr.pp-group th { position: static; }
+.pp-inhalt { display: contents; }
+.pp-btn { position: relative; } /* hält den unsichtbaren Screenreader-Text innerhalb der Tabelle */
+.wish-day { position: relative; }

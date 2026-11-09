@@ -262,3 +262,41 @@ test('Stempeluhr am Handy: Kommen, Raucherpause, Pause beenden, Gehen', { skip }
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+test('Dienstplan-Personenansicht: Woche/Monat, Filter, Eintragen per Antippen', { skip }, async () => {
+  for (const [name, device] of [['PC', DEVICES().PC], ['iPhone 13', DEVICES()['iPhone 13']]]) {
+    const { ctx, page, errors } = await open(device, mgr.state);
+    await show(page, 'plan');
+    await page.click('.segmented button:has-text("Personen")');
+    await page.waitForSelector('.pp-table');
+    assert.deepEqual(await H.axe(page), [], name);
+    assert.deepEqual(await H.layoutProblems(page), [], name);
+    await page.selectOption('select[aria-label=Zeitraum]', 'monat');
+    await page.waitForSelector('.pp-monat');
+    assert.deepEqual(await H.layoutProblems(page), [], name);
+    // Ansicht wird gemerkt
+    await page.reload(); await page.waitForSelector('.pp-monat');
+    if (name === 'PC') {
+      // Suche filtert die Zeilen
+      await page.fill('.pp input[type=search]', 'Becker');
+      await page.waitForFunction(() => document.querySelectorAll('tbody tr th.pp-name').length === 1);
+      // freies Feld antippen → offenen Dienst eintragen
+      const tag = new Date(Date.now() + 2 * 864e5).toISOString().slice(0, 10);
+      const idx = await page.evaluate((t) => [...document.querySelectorAll('thead th.pp-day')].findIndex((th) => th.textContent.endsWith(t.slice(8))), tag);
+      await page.locator('tbody tr:has(th.pp-name) td.pp-cell').nth(idx).locator('button').click();
+      await page.waitForSelector('dialog[open]');
+      assert.deepEqual(await H.axe(page), []);
+      const eintragen = page.locator('dialog[open] button:has-text("Eintragen")').first();
+      if (await eintragen.count()) {
+        await eintragen.click();
+        await page.waitForSelector('dialog[open]', { state: 'detached' }).catch(() => {});
+        const dlg = page.locator('dialog[open] button[type=submit]');
+        if (await dlg.count()) await dlg.click(); // ggf. Begründung/Bestätigung
+      }
+      await page.fill('.pp input[type=search]', '');
+    }
+    await page.click('.segmented button:has-text("Schichten")');
+    assert.deepEqual(errors, [], name);
+    await ctx.close();
+  }
+});

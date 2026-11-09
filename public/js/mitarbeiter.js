@@ -72,13 +72,17 @@ function zuschlagTable(rows, withName) {
 
 // ---------- Auswertung (Manager) ----------
 async function renderReport() {
-  const [r, exp] = await Promise.all([api('GET', `api/report?month=${state.month}`), exportCard()]);
+  const [r, exp, units] = await Promise.all([api('GET', `api/report?month=${state.month}`), exportCard(), api('GET', 'api/units')]);
+  const lf = listenFilter('report', units, renderReport);
+  const rows = r.rows.filter((x) => lf.passt(x.name, x.stammbereich_id));
   setMain(exp, h('div', { class: 'card' },
     h('div', { class: 'toolbar' },
       h('label', {}, 'Monat', h('input', { type: 'month', value: state.month, onchange: (e) => { state.month = e.target.value; renderReport(); } })),
+      ...lf.leiste,
       h('span', { class: 'spacer' }),
       h('a', { href: `api/report.csv?month=${state.month}` }, h('button', { class: 'ghost' }, 'CSV-Export (Excel)'))),
-    zuschlagTable(r.rows, true),
+    rows.length < r.rows.length ? h('p', { class: 'small muted' }, `${rows.length} von ${r.rows.length} Personen angezeigt (Station nach Stammbereich).`) : null,
+    zuschlagTable(rows, true),
     h('h3', {}, `Unterbesetzte Schichten (${r.understaffed.length})`),
     r.understaffed.length ? h('div', { class: 'table-wrap' }, h('table', {},
       h('thead', {}, h('tr', {}, ['Datum', 'Bereich', 'Dienst', 'Besetzt', 'Minimum', 'Qualifikation fehlt'].map((x) => h('th', {}, x)))),

@@ -3,6 +3,8 @@
 
 // ---------- Dienstplan (Wochenansicht) ----------
 async function renderPlan() {
+  bereichVorwahl();
+  if (state.planModus === 'personen') return renderPersonenplan();
   const from = state.weekStart, to = addDays(from, 6);
   const [units, types, plan, users] = await Promise.all([
     api('GET', 'api/units'), api('GET', 'api/shift-types'),
@@ -21,11 +23,12 @@ async function renderPlan() {
   const usedTypeIds = new Set(plan.shifts.map((s) => s.shift_type_id));
   const shownTypes = types.filter((t) => t.active || usedTypeIds.has(t.id));
 
-  const unitSelect = unitFilterSelect(units, f, (v) => { state.unitFilter = v; renderPlan(); });
+  const unitSelect = unitFilterSelect(units, f, (v) => { state.unitFilter = v; ansicht.set('unitFilter', v); renderPlan(); });
 
   const kw = isoWeek(from);
   const today = todayIso();
   const toolbar = h('div', { class: 'toolbar' },
+    planModusSchalter(),
     h('button', { class: 'ghost', onclick: () => { state.weekStart = addDays(from, -7); renderPlan(); } }, '‹ Vorwoche'),
     h('button', { class: 'ghost', onclick: () => { state.weekStart = mondayOf(todayIso()); renderPlan(); } }, 'Heute'),
     h('button', { class: 'ghost', onclick: () => { state.weekStart = addDays(from, 7); renderPlan(); } }, 'Nächste Woche ›'),
@@ -153,7 +156,7 @@ function renderPlanPhone({ from, days, plan, byKey, staffUsers, activeUnits, sho
     return cards.length ? h('section', {}, h('h3', {}, unit.name, unit.building_name ? h('span', { class: 'muted' }, unit.building_name) : null,
       unit.verbund_name ? h('span', { class: 'verbund-tag' }, `⇄ ${unit.verbund_name}`) : null), cards) : null;
   });
-  setMain(h('div', { class: 'card phone-plan' }, nav, unitSelect, chips, empty, head,
+  setMain(h('div', { class: 'card phone-plan' }, planModusSchalter(), nav, unitSelect, chips, empty, head,
     blocks.some(Boolean) ? blocks : (empty ? null : h('p', { class: 'muted' }, 'An diesem Tag sind keine Dienste angelegt.'))));
 }
 
@@ -212,12 +215,12 @@ function renderCell(s, staffUsers, compact = false) {
     const free = staffUsers.filter((u) => !s.assigned.some((a) => a.user_id === u.id));
     if (free.length) {
       action = h('select', { 'aria-label': `Person für ${s.type_name} am ${fmtDate(s.date)} (${s.unit_name}) eintragen`, onchange: (e) => { if (e.target.value) assign(s, Number(e.target.value)); } },
-        h('option', { value: '' }, compact ? '+ Person' : '+ Person eintragen'), free.map((u) => {
+        h('option', { value: '' }, compact ? '+ Person' : '+ Person eintragen'), personGruppen(free, s).map(([label, us]) => h('optgroup', { label }, us.map((u) => {
           const ab = absentIds.get(u.id);
           const w = wishOf(u.id, s.date);
           const wtxt = w ? (w.art === 'frei' ? ' · möchte frei' : w.shift_type_id === s.shift_type_id ? ' · ★ Wunschdienst' : ` · wünscht ${w.type_code}`) : '';
           return h('option', { value: u.id, disabled: !!ab }, `${u.name}${u.qualification ? ' – ' + u.qualification : ''}${ab ? ` (${absLabel(ab)})` : ''}${wtxt}`);
-        }));
+        }))));
     }
   } else if (mine) {
     action = h('button', { class: 'tiny ghost', onclick: () => unassign(s, state.me.id) }, 'Austragen');
@@ -344,4 +347,18 @@ async function moveShift(s, a, force = false) {
     toast(e.message, true);
   }
   refresh();
+}
+
+/** Auswahlliste „Person eintragen“ gliedern: Stammpersonal der Station, dann nach Qualifikation; Abwesende zuletzt */
+function personGruppen(free, s) {
+  const abwesend = new Set(absentOn(s.date).map((a) => a.user_id));
+  const sortiert = [...free].sort((a, b) => abwesend.has(a.id) - abwesend.has(b.id) || a.name.localeCompare(b.name, 'de'));
+  const stamm = sortiert.filter((u) => u.stammbereich_id === s.unit_id);
+  const rest = sortiert.filter((u) => u.stammbereich_id !== s.unit_id);
+  const gruppen = [];
+  if (stamm.length) gruppen.push([`Stammpersonal ${s.unit_name}`, stamm]);
+  const byQ = new Map();
+  for (const u of rest) { const q = u.qualification || 'ohne Qualifikation'; if (!byQ.has(q)) byQ.set(q, []); byQ.get(q).push(u); }
+  for (const [q, us] of byQ) gruppen.push([stamm.length ? `Weitere: ${q}` : q, us]);
+  return gruppen;
 }

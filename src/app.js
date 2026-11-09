@@ -1591,7 +1591,7 @@ function createApp(db, opts = {}) {
       }
       return {
         zulage, zulage_eur: zulageEur,
-        user_id: u.id, name: u.name, qualification: u.qualification, weekly_hours: u.weekly_hours,
+        user_id: u.id, name: u.name, qualification: u.qualification, weekly_hours: u.weekly_hours, stammbereich_id: u.stammbereich_id,
         min_hours_month: u.min_hours_month, dienste: shifts.length, nachtschichten,
         gearbeitet: r2(sum.stunden), urlaub_tage: urlaubTage, urlaub_std: r2(urlaubStd), krank_tage: krankTage, krank_std: r2(krankStd),
         sonder_tage: sonderTage, sonder_std: r2(sonderStd), fortbildung_tage: fortbildungTage, fortbildung_std: r2(fortbildungStd),

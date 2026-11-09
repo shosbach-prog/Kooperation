@@ -87,9 +87,10 @@ async function zeitenCard(rerender) {
 async function renderZeiten() {
   state.zeitenVon ||= addDays(todayIso(), -14);
   state.zeitenBis ||= todayIso();
-  const r = await api('GET', `api/zeiten?from=${state.zeitenVon}&to=${state.zeitenBis}`);
+  const [r, units] = await Promise.all([api('GET', `api/zeiten?from=${state.zeitenVon}&to=${state.zeitenBis}`), api('GET', 'api/units')]);
   const filter = state.zeitenFilter || 'alle';
-  let list = r.zeiten.filter((z) => z.date <= todayIso());
+  const lf = listenFilter('zeiten', units, renderZeiten);
+  let list = r.zeiten.filter((z) => z.date <= todayIso() && lf.passt(z.name, z.unit_id));
   if (filter === 'offen') list = list.filter((z) => !zeitIst(z));
   if (filter === 'abweichung') list = list.filter((z) => z.diff_std || (z.art === 'ruf' && z.einsatz_std > 0));
   const sum = (k) => list.reduce((a, z) => a + (Number(z[k]) || 0), 0);
@@ -99,7 +100,8 @@ async function renderZeiten() {
       h('label', {}, 'von', h('input', { type: 'date', value: state.zeitenVon, onchange: (e) => { state.zeitenVon = e.target.value; renderZeiten(); } })),
       h('label', {}, 'bis', h('input', { type: 'date', value: state.zeitenBis, onchange: (e) => { state.zeitenBis = e.target.value; renderZeiten(); } })),
       h('label', {}, 'Anzeigen', h('select', { onchange: (e) => { state.zeitenFilter = e.target.value; renderZeiten(); } },
-        [['alle', 'alle Einsätze'], ['offen', 'noch nicht erfasst'], ['abweichung', 'mit Abweichung']].map(([v, l]) => h('option', { value: v, selected: v === filter }, l))))),
+        [['alle', 'alle Einsätze'], ['offen', 'noch nicht erfasst'], ['abweichung', 'mit Abweichung']].map(([v, l]) => h('option', { value: v, selected: v === filter }, l)))),
+      ...lf.leiste),
     h('p', { class: 'muted small' }, `${list.length} Einsätze · Überstunden/Minderzeit gesamt: ${fmtNum(sum('diff_std'))} Std. · Ruf-Einsätze: ${fmtNum(sum('einsatz_std'))} Std. `,
       `Mitarbeitende können ihre Zeiten bis ${r.frist_tage} Tage nach dem Dienst selbst erfassen; die Verwaltung jederzeit.`),
     list.length ? zeitenTable(list, { withName: true, rerender: renderZeiten }) : h('p', { class: 'muted' }, 'Keine Einsätze.')));
