@@ -702,3 +702,21 @@ test('Rufbereitschaft ist keine Arbeitszeit: Zuweisung ohne Ausnahme, Lohn-Expor
     await mgr('PUT', '/api/requirements', reqs.map((x) => ({ ...x, min_staff: 0 })));
   }
 });
+
+test('Beispieldaten entfernen (nur Demo-Personen, nur Hauptverwaltung)', async () => {
+  // echte Person mit eigenem Passwort bleibt unberührt
+  const echt = (await mgr('POST', '/api/users', { username: 'echtperson', name: 'Echte Person', password: 'ganz-geheim-123', role: 'staff' })).data;
+  const v = (await mgr('GET', '/api/admin/beispieldaten')).data.personen;
+  assert.ok(v.some((p) => p.username === 'abecker'));
+  assert.ok(!v.some((p) => p.username === 'echtperson'));
+  const anna = await as('abecker');
+  assert.equal((await anna('GET', '/api/admin/beispieldaten')).status, 403);
+  assert.equal((await mgr('POST', '/api/admin/beispieldaten/entfernen', { ids: [echt.id] })).status, 400);
+  const r = (await mgr('POST', '/api/admin/beispieldaten/entfernen', { ids: v.map((p) => p.id) })).data;
+  assert.equal(r.entfernt, v.length);
+  const rest = (await mgr('GET', '/api/users')).data.map((u) => u.username);
+  assert.ok(rest.includes('echtperson') && rest.includes('manager'));
+  assert.ok(!rest.includes('abecker'));
+  assert.equal((await anna('GET', '/api/me')).status, 401); // Sitzung beendet
+  assert.deepEqual((await mgr('GET', '/api/admin/beispieldaten')).data.personen, []);
+});

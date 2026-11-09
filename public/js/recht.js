@@ -50,3 +50,20 @@ function cleanupCard() {
       } catch (e) { toast(e.message, true); }
     } }, 'Löschlauf jetzt starten'));
 }
+
+/** Karte „Beispieldaten entfernen“ in den Einstellungen (nur wenn welche vorhanden sind) */
+async function beispieldatenCard() {
+  let d;
+  try { d = await api('GET', 'api/admin/beispieldaten'); } catch { return null; }
+  if (!d.personen.length) return null;
+  return h('div', { class: 'card warn-card' }, h('h2', {}, `Beispieldaten entfernen (${d.personen.length} Personen)`),
+    h('p', { class: 'small' }, 'Diese Personen stammen aus den Beispieldaten der Ersteinrichtung (Passwort „demo123“) oder sind Demo-Gäste. ',
+      'Vor dem Echtbetrieb sollten sie entfernt werden – zusammen mit ihren Diensten, Abwesenheiten, Wünschen und Stempelzeiten.'),
+    h('p', { class: 'small muted' }, d.personen.map((p) => `${p.name}${p.dienste ? ` (${p.dienste} Dienste)` : ''}`).join(', ')),
+    h('button', { class: 'danger', onclick: async () => {
+      if (!await uiConfirm(`${d.personen.length} Beispielpersonen und alle ihre Einträge endgültig löschen? Das kann nicht rückgängig gemacht werden (außer über eine Sicherung).`,
+        { title: 'Beispieldaten entfernen?', okText: 'Endgültig entfernen', danger: true })) return;
+      try { const r = await api('POST', 'api/admin/beispieldaten/entfernen', { ids: d.personen.map((p) => p.id) }); toast(`${r.entfernt} Beispielpersonen entfernt.`); renderSettings(); } catch (e) { toast(e.message, true); }
+    } }, 'Beispielpersonen entfernen'),
+    h('p', { class: 'small muted' }, 'Beispiel-Stationen und -Dienstzeiten können Sie unter „Campus & Stationen“ bzw. „Dienstzeiten“ umbenennen oder deaktivieren.'));
+}

@@ -197,7 +197,7 @@ async function renderSettings() {
       toast('Einstellungen gespeichert.');
     } catch (e) { toast(e.message, true); }
   });
-  setMain(form, logoCard(), cleanupCard());
+  setMain(await beispieldatenCard(), form, logoCard(), cleanupCard());
 }
 
 function logoCard() {
