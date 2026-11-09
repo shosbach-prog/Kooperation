@@ -68,3 +68,17 @@ test('Zuschlag in Euro', () => {
   const b = { nacht: 8, samstag: 0, sonntag: 2, feiertag: 0, vorfest: 0 };
   near(T.zuschlagEuro(b, S, 20), 20 * (8 * 0.2 + 2 * 0.25));
 });
+
+test('Sprachparser: Diktat in Felder zerlegen, Patientendaten erkennen', () => {
+  const P = require('../public/js/sprachparser');
+  const r = P.parse('Belegung 18. Zwei Zugänge, eine Entlassung. Sturz um 14 Uhr, keine Verletzung. Aufzug ausgefallen. Kollegin hat sich krank gemeldet. Polizeieinsatz gegen 22:30 wegen Bedrohung. Medikamentenlieferung kommt erst morgen');
+  assert.equal(r.belegung, 18); assert.equal(r.zugaenge, 2); assert.equal(r.entlassungen, 1);
+  assert.deepEqual(r.vorkommnisse.map((v) => [v.art, v.uhrzeit]), [['Sturz', '14:00'], ['Technische Störung', null], ['Personalausfall', null], ['Polizeieinsatz', '22:30']]);
+  assert.equal(r.vorkommnisse[0].notiz, 'keine Verletzung');
+  assert.equal(r.notiz, 'Medikamentenlieferung kommt erst morgen.');
+  assert.equal(P.parse('Drei Aufnahmen und keine Entlassung').entlassungen, 0);
+  assert.equal(P.parse('Aggressives Verhalten um 9 Uhr 15').vorkommnisse[0].uhrzeit, '09:15');
+  assert.equal(P.patientendaten('Aufzug defekt, Station ruhig').length, 0);
+  assert.ok(P.patientendaten('Frau Schmidt Zimmer 3').length);
+  assert.ok(P.patientendaten('Pat.-Nr. 1234567').length);
+});

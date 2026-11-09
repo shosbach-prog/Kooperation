@@ -171,7 +171,8 @@ async function stempelCard() {
         h('dt', {}, 'Pausen'), h('dd', {}, minText(e.pause_min)),
         h('dt', {}, 'Raucherpausen'), h('dd', {}, minText(e.raucher_min), !d.einstellungen.raucherpause_abziehen ? h('span', { class: 'muted small' }, ' (zählen als Arbeitszeit)') : null),
         e.ergaenzt_min ? [h('dt', {}, 'Mindestpause ergänzt'), h('dd', {}, `${e.ergaenzt_min} Min. (§ 4 ArbZG)`)] : null,
-        h('dt', {}, 'Arbeitszeit'), h('dd', {}, h('strong', {}, minText(e.netto_min))))))) : null;
+        h('dt', {}, 'Arbeitszeit'), h('dd', {}, h('strong', {}, minText(e.netto_min)))),
+      e.dienst?.shift_id ? h('button', { type: 'button', class: 'ghost', onclick: () => oeffneProtokoll(e.dienst.shift_id) }, '📋 Schichtprotokoll ausfüllen') : null))) : null;
     const q = warteschlange();
     const offlineHinweis = q.length || d.aus_speicher ? h('div', { class: 'stempel-offline', role: 'status' },
       h('span', { class: 'badge warn' }, 'Offline'),

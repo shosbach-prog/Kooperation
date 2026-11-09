@@ -65,8 +65,9 @@ module.exports = (app, ctx) => {
     const msg = Number(s.loeschfrist_mitteilungen_tage) || 0;
     if (msg > 0) out.mitteilungen = Number(db.prepare("DELETE FROM notifications WHERE created_at < datetime('now', ?)").run(`-${msg} days`).changes);
     out.sitzungen = Number(db.prepare('DELETE FROM sessions WHERE expires < ?').run(Date.now()).changes);
+    for (const extra of ctx.cleanupExtras || []) Object.assign(out, extra(monthsAgo));
     db.prepare("DELETE FROM reminders_sent WHERE at < datetime('now', '-400 days')").run();
-    if (out.au || out.protokoll || out.mitteilungen) audit(null, 'datenschutz.loeschung', out);
+    if (out.au || out.protokoll || out.mitteilungen || out.schichtprotokolle) audit(null, 'datenschutz.loeschung', out);
     return out;
   };
   ctx.cleanup = cleanup;

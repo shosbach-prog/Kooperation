@@ -846,3 +846,71 @@ test('Flexpool und Externe: Kennzeichnung, Auswertung, Einsatznachweis, nicht in
   assert.ok(!lohn.lines.some((l) => l.name === 'Ex Tern'));
   assert.ok(!lohn.fehlend.includes('Ex Tern'));
 });
+
+test('Schichtprotokoll: schreiben, Patientendaten-Schutz, abzeichnen, Rechte, Auswertung', async () => {
+  const d = day(-1);
+  const s = await shiftOn(d, 'S', 'Station 1');
+  const st2 = (await mgr('GET', '/api/units')).data.find((u) => u.name === 'Station 2').id;
+  await mgr('POST', '/api/users', { username: 'sp-pfk', name: 'SP Fachkraft', password: 'demo12345', role: 'staff' });
+  await mgr('POST', '/api/users', { username: 'sp-fremd', name: 'SP Fremd', password: 'demo12345', role: 'staff', stammbereich_id: st2 });
+  const uid = (await mgr('GET', '/api/users')).data.find((u) => u.username === 'sp-pfk').id;
+  await mgr('POST', `/api/shifts/${s.id}/assign`, { user_id: uid, force: true });
+  const pk = client(); await login(pk, 'sp-pfk', 'demo12345');
+  const fremd = client(); await login(fremd, 'sp-fremd', 'demo12345');
+
+  // Ansicht und Übersicht
+  let r = await pk('GET', `/api/schichtprotokolle/${s.id}`);
+  assert.equal(r.status, 200);
+  assert.equal(r.data.protokoll, null);
+  assert.ok(r.data.arten.includes('Sturz'));
+  assert.ok((await pk('GET', `/api/schichtprotokolle?from=${d}&to=${d}`)).data.dienste.some((x) => x.shift_id === s.id && x.status === 'fehlt'));
+  assert.equal((await fremd('GET', `/api/schichtprotokolle/${s.id}`)).status, 404);
+
+  const body = { belegung: 18, zugaenge: 2, entlassungen: 1, verlegungen: 0, notiz: 'Aufzug defekt, Haustechnik informiert.', per_sprache: true,
+    vorkommnisse: [{ art: 'Sturz', anzahl: 1, uhrzeit: '14:00', notiz: 'keine Verletzung' }] };
+  assert.equal((await pk('PUT', `/api/schichtprotokolle/${s.id}`, { ...body, vorkommnisse: [{ art: 'Erfunden' }] })).status, 400);
+  // Patientendaten werden erkannt
+  r = await pk('PUT', `/api/schichtprotokolle/${s.id}`, { ...body, notiz: 'Herr Müller war unruhig, geb. 12.03.1961' });
+  assert.equal(r.data.code, 'PATIENTENDATEN');
+  assert.ok(r.data.funde.length >= 2);
+  assert.equal((await fremd('PUT', `/api/schichtprotokolle/${s.id}`, body)).status, 404);
+  r = await pk('PUT', `/api/schichtprotokolle/${s.id}`, body);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.vorkommnisse.length, 1);
+  assert.equal(r.data.per_sprache, 1);
+  // abzeichnen, danach nur mit Grund ändern
+  r = await pk('POST', `/api/schichtprotokolle/${s.id}/abzeichnen`);
+  assert.equal(r.data.abgezeichnet_von_name, 'SP Fachkraft');
+  assert.equal((await pk('PUT', `/api/schichtprotokolle/${s.id}`, { ...body, belegung: 19 })).data.code, 'BEGRUENDUNG');
+  r = await pk('PUT', `/api/schichtprotokolle/${s.id}`, { ...body, belegung: 19, aenderungsgrund: 'Nachaufnahme vergessen' });
+  assert.equal(r.data.belegung, 19);
+  assert.ok((await mgr('GET', '/api/audit?limit=20')).status !== 500);
+
+  // Auswertung und CSV (Verwaltung)
+  const a = (await mgr('GET', `/api/schichtprotokolle-auswertung?month=${d.slice(0, 7)}`)).data;
+  const st = a.stationen.find((x) => x.unit_id === s.unit_id);
+  assert.ok(st.protokolle >= 1 && st.abgezeichnet >= 1);
+  assert.ok(st.vorkommnisse.Sturz >= 1);
+  assert.equal((await pk('GET', `/api/schichtprotokolle-auswertung?month=${d.slice(0, 7)}`)).status, 403);
+  const csv = (await mgr('GET', `/api/schichtprotokolle.csv?month=${d.slice(0, 7)}`)).data;
+  assert.match(csv, /Sturz 14:00 \(keine Verletzung\)/);
+});
+
+test('Schichtprotokoll: nach Monatsabschluss gesperrt', async () => {
+  const now = new Date();
+  const vm = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 20)).toISOString().slice(0, 10);
+  const s = await shiftOn(vm, 'F', 'Station 2');
+  assert.equal((await mgr('PUT', `/api/schichtprotokolle/${s.id}`, { belegung: 10 })).status, 200);
+  await mgr('POST', '/api/monatsabschluss', { month: vm.slice(0, 7), unit_ids: [s.unit_id] });
+  try {
+    assert.equal((await mgr('PUT', `/api/schichtprotokolle/${s.id}`, { belegung: 11 })).data.code, 'ABGESCHLOSSEN');
+    assert.equal((await mgr('GET', `/api/schichtprotokolle/${s.id}`)).data.darf_schreiben, false);
+  } finally {
+    await mgr('DELETE', `/api/monatsabschluss?month=${vm.slice(0, 7)}&unit_id=${s.unit_id}`, { grund: 'Testende' });
+  }
+});
+
+test('Einstellungen: Pflichtlisten können nicht geleert werden, leere Altwerte werden repariert', async () => {
+  assert.equal((await mgr('PUT', '/api/settings', { qualifikationen: [''] })).status, 400);
+  assert.ok((await mgr('GET', '/api/settings')).data.qualifikationen.length >= 3);
+});

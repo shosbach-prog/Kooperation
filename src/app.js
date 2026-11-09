@@ -69,9 +69,12 @@ function createApp(db, opts = {}) {
   app.use(express.static(path.join(__dirname, '..', 'public')));
 
   // ---------- Hilfsfunktionen ----------
+  const PFLICHT_LISTEN = ['qualifikationen', 'lohnarten', 'vorkommnis_arten'];
   const getSettings = () => {
     const out = { ...DEFAULT_SETTINGS };
     for (const row of db.prepare('SELECT key, value FROM settings').all()) out[row.key] = JSON.parse(row.value);
+    // Pflichtlisten nie leer (Schutz/Reparatur nach einem früheren Anzeigefehler, der Listen beim Speichern leeren konnte)
+    for (const k of PFLICHT_LISTEN) if (!Array.isArray(out[k]) || !out[k].length) out[k] = DEFAULT_SETTINGS[k];
     return out;
   };
 
@@ -338,6 +341,7 @@ function createApp(db, opts = {}) {
       if (Array.isArray(def)) {
         if (!Array.isArray(v)) throw new HttpError(400, `Ungültige Liste für ${k}.`);
         v = [...new Set(v.map((x) => String(x).trim()).filter(Boolean))].slice(0, 100);
+        if (!v.length && PFLICHT_LISTEN.includes(k)) throw new HttpError(400, `Die Liste „${k}“ darf nicht leer sein.`);
       }
       if (k === 'akzentfarbe' && !/^#[0-9a-f]{6}$/i.test(String(v))) throw new HttpError(400, 'Farbe bitte als #RRGGBB angeben.');
       if (k === 'klinik_name' && !String(v).trim()) throw new HttpError(400, 'Name der Einrichtung fehlt.');
@@ -1699,7 +1703,7 @@ function createApp(db, opts = {}) {
     }
     const status = err.status || (err.type === 'entity.parse.failed' ? 400 : 500);
     if (status >= 500) console.error(err);
-    res.status(status).json({ error: status >= 500 ? 'Interner Fehler.' : err.message, code: err.code });
+    res.status(status).json({ error: status >= 500 ? 'Interner Fehler.' : err.message, code: err.code, ...(err.funde ? { funde: err.funde } : {}) });
   });
 
   const root = express();

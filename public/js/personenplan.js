@@ -210,6 +210,7 @@ async function personTag(p, d, shifts) {
     gesperrt ? h('p', { class: 'small muted' }, '🔒 Der Monat ist für diese Station abgeschlossen.') : null,
     w && isMgr() ? h('p', { class: 'small' }, w.art === 'frei' ? '♡ möchte an diesem Tag frei haben' : `★ Wunschdienst: ${w.type_name}`, w.note ? ` (${w.note})` : '') : null,
     own.length ? h('div', {}, h('h3', {}, 'Eingeteilt'), h('ul', { class: 'pp-dlg-list' }, own.map((s) => h('li', {}, dienstZeile(s),
+      s.date <= todayIso() ? h('button', { class: 'tiny ghost', onclick: () => { close(); oeffneProtokoll(s.id); } }, '📋 Protokoll') : null,
       s.gesperrt ? h('span', { class: 'badge' }, '🔒 abgeschlossen') : h('span', { class: 'actions' },
         s.verbund?.partner?.length && (canManageUnit(s.unit_id) || selbst) ? h('button', { class: 'tiny ghost', onclick: () => { close(); moveShift(s, { user_id: p.id, name: p.name }); } }, '⇄ Umsetzen') : null,
         canManageUnit(s.unit_id) || selbst ? h('button', { class: 'tiny danger', onclick: () => { close(); unassign(s, p.id, selbst ? undefined : p.name); } }, 'Austragen') : null))))) : null,

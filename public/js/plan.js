@@ -208,9 +208,10 @@ function renderCell(s, staffUsers, compact = false) {
 
   const count = h('div', { class: 'count' },
     h('span', {}, `${n}/${s.max_staff ?? '∞'} · min ${s.min_staff}`, besetzungsArt(s)),
-    canManageUnit(s.unit_id) ? h('span', { class: 'li-actions' },
-      s.unterbesetzt ? h('button', { class: 'tiny ghost', title: 'Rundruf: Personal benachrichtigen', 'aria-label': 'Rundruf senden', onclick: () => rundruf(s) }, '📣') : null,
-      h('button', { class: 'tiny ghost', title: 'Besetzung/Notiz ändern', 'aria-label': 'Besetzung oder Notiz ändern', onclick: () => editShift(s) }, '✎')) : null);
+    canManageUnit(s.unit_id) || (mine && s.date <= todayIso()) ? h('span', { class: 'li-actions' },
+      s.date <= todayIso() ? h('button', { class: 'tiny ghost', title: 'Schichtprotokoll', 'aria-label': `Schichtprotokoll ${s.type_name} ${fmtDate(s.date)} öffnen`, onclick: () => oeffneProtokoll(s.id) }, '📋') : null,
+      !canManageUnit(s.unit_id) ? null : s.unterbesetzt ? h('button', { class: 'tiny ghost', title: 'Rundruf: Personal benachrichtigen', 'aria-label': 'Rundruf senden', onclick: () => rundruf(s) }, '📣') : null,
+      canManageUnit(s.unit_id) ? h('button', { class: 'tiny ghost', title: 'Besetzung/Notiz ändern', 'aria-label': 'Besetzung oder Notiz ändern', onclick: () => editShift(s) }, '✎') : null) : null);
 
   let action = null;
   if (canManageUnit(s.unit_id)) {

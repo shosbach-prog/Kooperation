@@ -12,8 +12,8 @@ const skip = !H.playwright && 'Playwright ist nicht installiert';
 let server, url, browser, mgr, staff;
 
 const VIEWS = {
-  manager: ['plan', 'tausch', 'rueckmeldung', 'abwesenheiten', 'staff', 'stationen', 'generate', 'types', 'req', 'zeiten', 'report', 'log', 'settings', 'account'],
-  staff: ['plan', 'stempel', 'mine', 'rueckmeldung', 'abwesenheit', 'konto', 'wuensche', 'tausch', 'account'],
+  manager: ['plan', 'tausch', 'protokolle', 'rueckmeldung', 'abwesenheiten', 'staff', 'stationen', 'generate', 'types', 'req', 'zeiten', 'report', 'log', 'settings', 'account'],
+  staff: ['plan', 'stempel', 'mine', 'protokolle', 'rueckmeldung', 'abwesenheit', 'konto', 'wuensche', 'tausch', 'account'],
 };
 const DEVICES = () => ({
   'iPhone 13': H.playwright.devices['iPhone 13'],
@@ -360,5 +360,71 @@ test('Stempeln ohne Netz: Warteschlange, Übertragung, App offline öffnen', { s
   // Abmelden löscht den Zwischenspeicher
   await page.click('#bottomnav button:has-text("Menü")');
   assert.deepEqual(errors.filter((e) => !/Failed to fetch|NetworkError/.test(e)), []);
+  await ctx.close();
+});
+
+test('Schichtprotokoll: Diktat (simuliert, auf dem Gerät), Vorschau, Patientendaten-Warnung, Speichern, Abzeichnen', { skip }, async () => {
+  const { ctx, page, errors } = await open(DEVICES()['iPhone 13'], staff.state);
+  // Spracherkennung simulieren: liefert ein festes Diktat, „auf dem Gerät“ verfügbar
+  await ctx.addInitScript(() => {
+    class FakeSR {
+      static async available() { return 'available'; }
+      start() { setTimeout(() => { const r = [{ transcript: window.__diktat || '' }]; r.isFinal = true; this.onresult({ resultIndex: 0, results: [r] }); }, 50); }
+      stop() { setTimeout(() => this.onend && this.onend(), 10); }
+    }
+    window.SpeechRecognition = FakeSR;
+  });
+  // eigener Dienst von gestern
+  const m = await browser.newContext({ storageState: mgr.state });
+  const api = async (method, u, data) => (await m.request.fetch(`${url}${u}`, { method, data })).json();
+  const gestern = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+  await api('POST', 'api/shifts/generate', { from: gestern, to: gestern });
+  const s = (await api('GET', `api/plan?from=${gestern}&to=${gestern}`)).shifts.find((x) => x.type_code === 'S' && x.unit_name === 'Station 2');
+  const users = await api('GET', 'api/users');
+  await api('POST', `api/shifts/${s.id}/assign`, { user_id: users.find((u) => u.username === 'abecker').id, force: true });
+  await m.close();
+
+  await page.goto(`${url}#protokolle`);
+  await page.waitForSelector('.prot-zeile.mein .prot-btn');
+  await page.locator('.prot-zeile.mein .prot-btn').first().click();
+  await page.waitForSelector('.diktat-btn');
+  assert.deepEqual(await H.axe(page), []);
+  assert.deepEqual(await H.layoutProblems(page), []);
+  await page.evaluate(() => { window.__diktat = 'Belegung 18. Zwei Zugänge, eine Entlassung. Sturz um 14 Uhr, keine Verletzung. Aufzug defekt'; });
+  await page.click('.diktat-btn');
+  await page.waitForTimeout(200);
+  await page.click('.diktat-btn'); // „Fertig“
+  await page.waitForSelector('.diktat-vorschau:not([hidden])');
+  assert.match(await page.textContent('.diktat-vorschau'), /Belegung: 18/);
+  assert.match(await page.textContent('.diktat-vorschau'), /Sturz um 14:00/);
+  await page.click('.diktat-vorschau button:has-text("Übernehmen")');
+  assert.equal(await page.inputValue('input[aria-label="Belegung"]'), '18');
+  assert.equal(await page.locator('.vk-zeile').count(), 2);
+  // Patientendaten im Freitext → Warnung
+  await page.fill('textarea[aria-label="Übergabe-Notiz"]', 'Frau Schmidt unruhig');
+  await page.waitForSelector('.pd-warnung:not([hidden])');
+  await page.fill('textarea[aria-label="Übergabe-Notiz"]', 'Ruhige Schicht.');
+  await page.waitForSelector('.protokoll > .pd-warnung[hidden]', { state: 'attached' });
+  await page.click('button:has-text("Speichern und abzeichnen")');
+  await page.waitForSelector('text=abgezeichnet von Anna Becker');
+  await page.screenshot({ path: require('path').join(require('os').tmpdir(), 'pep-protokoll.png'), fullPage: true });
+  assert.deepEqual(await H.layoutProblems(page), []);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('Mehrzeilige Felder zeigen gespeicherte Inhalte (Einstellungen, Personalakte)', { skip }, async () => {
+  const { ctx, page, errors } = await open(DEVICES().PC, mgr.state);
+  await show(page, 'settings');
+  const listen = await page.$$eval('form textarea', (els) => els.map((e) => e.value));
+  assert.ok(listen.some((v) => v.includes('Pflegefachkraft')), 'Qualifikationen-Liste muss gefüllt sein');
+  assert.ok(listen.some((v) => v.includes('Sturz')), 'Vorkommnis-Arten müssen gefüllt sein');
+  // Speichern ohne Änderung darf keine Liste leeren
+  await page.click('form button[type=submit]');
+  await page.waitForTimeout(500);
+  const st = await page.evaluate(() => fetch('api/settings').then((r) => r.json()));
+  assert.ok(st.qualifikationen.length >= 3);
+  assert.ok(st.lohnarten.length >= 3);
+  assert.deepEqual(errors, []);
   await ctx.close();
 });

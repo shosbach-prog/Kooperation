@@ -52,6 +52,10 @@ const DEFAULT_SETTINGS = {
   mindestpause_ergaenzen: true,
   // Raucherpausen sind keine Arbeitszeit und werden abgezogen (false = als Arbeitszeit werten)
   raucherpause_abziehen: true,
+  // Schichtprotokoll: Arten besonderer Vorkommnisse (ohne Patientenbezug), Aufbewahrung, Spracheingabe
+  vorkommnis_arten: ['Notfall/Reanimation', 'Sturz', 'Aggressionsereignis', 'Selbstverletzung', 'Polizeieinsatz', 'Entweichung', 'Technische Störung', 'Personalausfall'],
+  loeschfrist_schichtprotokoll_monate: 36,
+  sprache_cloud_erlaubt: false,
   impressum_text: '',
   datenschutz_text: '',
   // Lohnart-Nummern für die Übergabe an die Entgeltabrechnung (Schlüssel=Nummer); bitte mit der Personalabteilung abstimmen
@@ -322,6 +326,26 @@ CREATE TABLE IF NOT EXISTS audit_log (
   details TEXT
 );
 
+-- Schichtprotokoll (Stationsbetrieb, ausdrücklich ohne Patientenbezug)
+CREATE TABLE IF NOT EXISTS schichtprotokolle (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shift_id INTEGER NOT NULL UNIQUE REFERENCES shifts(id) ON DELETE CASCADE,
+  belegung INTEGER, betten INTEGER, zugaenge INTEGER, entlassungen INTEGER, verlegungen INTEGER,
+  notiz TEXT NOT NULL DEFAULT '',
+  erstellt_von INTEGER, erstellt_am TEXT NOT NULL DEFAULT (datetime('now')),
+  geaendert_von INTEGER, geaendert_am TEXT,
+  abgezeichnet_von INTEGER, abgezeichnet_am TEXT,
+  per_sprache INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS schichtprotokoll_vorkommnisse (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  protokoll_id INTEGER NOT NULL REFERENCES schichtprotokolle(id) ON DELETE CASCADE,
+  art TEXT NOT NULL,
+  anzahl INTEGER NOT NULL DEFAULT 1,
+  uhrzeit TEXT NOT NULL DEFAULT '',
+  notiz TEXT NOT NULL DEFAULT ''
+);
+
 -- Monatsabschluss je Station: danach sind Dienste, Ist-Zeiten und Abwesenheiten dieses Monats gesperrt
 CREATE TABLE IF NOT EXISTS monatsabschluss (
   monat TEXT NOT NULL,
@@ -347,6 +371,15 @@ CREATE TRIGGER IF NOT EXISTS sperre_shift_upd BEFORE UPDATE ON shifts
   BEGIN SELECT RAISE(ABORT, 'MONAT_ABGESCHLOSSEN'); END;
 CREATE TRIGGER IF NOT EXISTS sperre_shift_del BEFORE DELETE ON shifts
   WHEN EXISTS (SELECT 1 FROM monatsabschluss m WHERE m.unit_id = OLD.unit_id AND m.monat = substr(OLD.date, 1, 7))
+  BEGIN SELECT RAISE(ABORT, 'MONAT_ABGESCHLOSSEN'); END;
+CREATE TRIGGER IF NOT EXISTS sperre_sp_ins BEFORE INSERT ON schichtprotokolle
+  WHEN EXISTS (SELECT 1 FROM shifts s JOIN monatsabschluss m ON m.unit_id = s.unit_id AND m.monat = substr(s.date, 1, 7) WHERE s.id = NEW.shift_id)
+  BEGIN SELECT RAISE(ABORT, 'MONAT_ABGESCHLOSSEN'); END;
+CREATE TRIGGER IF NOT EXISTS sperre_sp_upd BEFORE UPDATE ON schichtprotokolle
+  WHEN EXISTS (SELECT 1 FROM shifts s JOIN monatsabschluss m ON m.unit_id = s.unit_id AND m.monat = substr(s.date, 1, 7) WHERE s.id = OLD.shift_id)
+  BEGIN SELECT RAISE(ABORT, 'MONAT_ABGESCHLOSSEN'); END;
+CREATE TRIGGER IF NOT EXISTS sperre_spv BEFORE INSERT ON schichtprotokoll_vorkommnisse
+  WHEN EXISTS (SELECT 1 FROM schichtprotokolle p JOIN shifts s ON s.id = p.shift_id JOIN monatsabschluss m ON m.unit_id = s.unit_id AND m.monat = substr(s.date, 1, 7) WHERE p.id = NEW.protokoll_id)
   BEGIN SELECT RAISE(ABORT, 'MONAT_ABGESCHLOSSEN'); END;
 CREATE TRIGGER IF NOT EXISTS sperre_abs_ins BEFORE INSERT ON absences
   WHEN EXISTS (SELECT 1 FROM monatsabschluss m WHERE m.unit_id = (SELECT stammbereich_id FROM users WHERE id = NEW.user_id)
