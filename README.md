@@ -83,6 +83,10 @@ Arbeitszeit wird angelehnt an den **TVöD (BT-K)** angerechnet.
 - **Weitere Abwesenheiten:** Fortbildung, Kind krank, Elternzeit; **Resturlaub-Übertrag** mit Verfall zum Stichtag
 - **Exporte:** Lohn-Übergabe als CSV je Personalnummer und Lohnart (Nummern einstellbar); druckfertiger **Dienstplan-Aushang** (A4 quer, ohne Abwesenheitsgründe)
 - **Datenschutz:** Impressum und Datenschutzhinweise (Muster) auf der Anmeldeseite; **Löschfristen** für AU-Bescheinigungen, Protokoll und Mitteilungen; Download „Meine Daten“ (Art. 15 DSGVO)
+- **Personenansicht im Dienstplan:** Zeilen = Personen, Spalten = Tage (Woche/Monat), mit Filtern und Besetzungszeile – übersichtlich auch bei 50+ Mitarbeitenden
+- **Stempeluhr** fürs Handy mit Pausen und Raucherpausen, gesetzlicher Mindestpause und **Stempeln ohne Netz**
+- **Qualifikation vertritt** (z. B. Fachkraft zählt als Hilfskraft), **Monatsabschluss** je Station mit Sperre, **Rückmeldung** aus der App, **Beispieldaten entfernen**
+- **Single Sign-on** über das Klinik-Konto (OpenID Connect, z. B. Microsoft Entra ID) – siehe [deploy/SSO.md](deploy/SSO.md)
 - **Passkeys:** Anmeldung per Fingerabdruck, Gesichtserkennung oder Geräte-PIN (WebAuthn) – ohne Passwort und Code; Einrichtung unter „Mein Profil“, bei Handyverlust entfernt „2FA zurücksetzen“ auch die Passkeys
 - **Barrierefreiheit:** geprüft mit axe-core nach WCAG 2.1 AA (Kontraste, Beschriftungen, Tastatur, Sprunglink, dunkler Modus)
 - **Betrieb:** verschlüsselte tägliche Sicherung (AES-256-GCM), Kopie auf einen zweiten Rechner, Zustandsprüfung `/api/health` für Überwachungsdienste – siehe [deploy/UEBERWACHUNG.md](deploy/UEBERWACHUNG.md)
@@ -217,5 +221,5 @@ e2e/               Oberflächentests im Browser inkl. Barrierefreiheit (npm run 
 ## Mögliche nächste Schritte
 
 - Qualifikationen, die auch andere vertreten dürfen (z. B. Pflegefachkraft zählt als Pflegehilfe)
-- Anmeldung über das Klinik-Verzeichnis (Single Sign-on, z. B. Active Directory / Entra ID)
+
 - Direkte Schnittstelle zum Lohn- oder Zeiterfassungssystem statt CSV

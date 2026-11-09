@@ -44,6 +44,13 @@ function renderLogin() {
   const node = document.getElementById('login-tpl').content.cloneNode(true);
   setMain(node);
   fillLoginBrand(main().querySelector('.login-brand'));
+  // Anmeldung über das Klinik-Konto (Single Sign-on), falls eingerichtet
+  const sso = state.branding?.sso && !state.branding?.demo ? h('div', { class: 'sso-login' },
+    h('a', { class: 'button sso-btn', href: 'api/sso/start' }, icon('campus'), ` Mit ${state.branding.sso.name} anmelden`),
+    h('div', { class: 'oder', 'aria-hidden': 'true' }, 'oder mit Benutzername')) : null;
+  if (sso) main().querySelector('#login-form').before(sso);
+  const ssoFehler = new URLSearchParams(location.search).get('sso_fehler');
+  if (ssoFehler) { document.getElementById('login-error').textContent = ssoFehler; history.replaceState(null, '', location.pathname); }
   const pk = passkeyLoginButton();
   if (pk) main().querySelector('#login-form').after(pk);
   main().querySelector('.login').append(legalLinks());

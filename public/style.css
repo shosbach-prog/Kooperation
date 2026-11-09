@@ -613,3 +613,6 @@ table.pp-table tr.pp-group th { position: static; }
 .rm-kopf { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
 .rm-text { white-space: pre-wrap; margin: .4rem 0; }
 .rm-antwort { background: color-mix(in srgb, var(--primary) 6%, var(--card)); border-radius: var(--radius-sm); padding: .4rem .6rem; margin: .3rem 0; white-space: pre-wrap; }
+.sso-login { display: grid; gap: .6rem; margin: .8rem 0 .2rem; }
+a.sso-btn { display: flex; align-items: center; justify-content: center; gap: .5rem; min-height: 48px; border-radius: var(--radius-sm); background: var(--primary); color: var(--primary-ink); text-decoration: none; font-weight: 600; }
+a.sso-btn:hover { filter: brightness(1.08); }
