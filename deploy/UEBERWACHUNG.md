@@ -82,7 +82,14 @@ Ein kostenloser Überwachungsdienst kann diese Adresse alle 5 Minuten aufrufen u
 
 Docker prüft den Zustand zusätzlich selbst (`HEALTHCHECK`). `docker compose ps` zeigt `healthy` oder `unhealthy`.
 
-## 5. Weitere Empfehlungen für den Echtbetrieb
+## 5. Automatische Updates
+
+`install.sh` richtet auf Wunsch (Standard: an) ein nächtliches Update um 4:30 Uhr ein (`deploy/auto-update.sh`):
+neue Version holen → **Sicherung** → einspielen → **Funktion prüfen** → bei einem Fehler **automatisch zurück** zur vorherigen Version.
+Eine fehlgeschlagene Version wird nicht jede Nacht erneut versucht. Protokoll: `/var/log/dienstplan-update.log`.
+Ein-/Ausschalten: `AUTO_UPDATE=1` bzw. `0` in `deploy/.env`, danach `install.sh`. Sofort auslösen: `/opt/dienstplan/deploy/auto-update.sh`.
+
+## 6. Weitere Empfehlungen für den Echtbetrieb
 
 - Automatische Sicherheitsupdates des Servers aktivieren: `apt install unattended-upgrades`.
 - Das Server-Protokoll gelegentlich prüfen: `docker compose logs --since 24h app`.

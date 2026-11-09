@@ -39,7 +39,10 @@ SERVER_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if 
 KEEP_ENV="n"
 if [ -f "$DEPLOY_DIR/.env" ]; then
   gelb "Es gibt bereits eine Konfiguration ($DEPLOY_DIR/.env)."
+  # AUTO=1 (nächtliches automatisches Update): keine Rückfragen, Konfiguration behalten
+  if [ "${AUTO:-0}" = 1 ]; then KEEP_ENV=j; else
   read -r -p "Bestehende Konfiguration behalten und nur aktualisieren? [J/n] " KEEP_ENV
+  fi
   KEEP_ENV="${KEEP_ENV:-j}"
 fi
 
@@ -135,7 +138,7 @@ if ! grep -q '^DEMO_BEREICH=' "$DEPLOY_DIR/.env"; then
   echo "Demo-Bereich: Auf der Startseite gibt es dann \"Als Leitung\" / \"Als Pflegekraft\" ausprobieren –"
   echo "ohne Anmeldung, mit eigenen Beispieldaten (getrennt von den echten Daten, jede Nacht frisch)."
   echo "Darunter bleibt die normale Anmeldung mit Passwort und Zwei-Faktor-Code für die echten Daten."
-  read -r -p "Demo-Bereich anbieten? [J/n] " DB_ANS; DB_ANS="${DB_ANS:-j}"
+  if [ "${AUTO:-0}" = 1 ]; then DB_ANS=j; else read -r -p "Demo-Bereich anbieten? [J/n] " DB_ANS; DB_ANS="${DB_ANS:-j}"; fi
   if [[ "$DB_ANS" =~ ^[JjYy] ]]; then DB_ANS=1; else DB_ANS=0; fi
   printf '\n# Demo-Bereich mit getrennten Beispieldaten unter /demo/ (1 = an, 0 = aus)\nDEMO_BEREICH=%s\n' "$DB_ANS" >> "$DEPLOY_DIR/.env"
 fi
@@ -181,6 +184,24 @@ cat > /etc/cron.d/dienstplan-backup <<EOF
 EOF
 chmod 644 /etc/cron.d/dienstplan-backup
 
+# --- Automatische Updates (nachts) ------------------------------------------
+if ! grep -q '^AUTO_UPDATE=' "$DEPLOY_DIR/.env"; then
+  echo
+  echo "Automatische Updates: Jede Nacht um 4:30 Uhr holt sich der Server die neueste Version,"
+  echo "sichert vorher die Daten, prüft danach die Funktion und kehrt bei einem Fehler automatisch zur alten Version zurück."
+  if [ "${AUTO:-0}" = 1 ]; then AU=j; else read -r -p "Automatische Updates einschalten? [J/n] " AU; AU="${AU:-j}"; fi
+  if [[ "$AU" =~ ^[JjYy] ]]; then AU=1; else AU=0; fi
+  printf '\n# Automatische Updates jede Nacht (1 = an, 0 = aus)\nAUTO_UPDATE=%s\n' "$AU" >> "$DEPLOY_DIR/.env"
+fi
+chmod +x "$DEPLOY_DIR/auto-update.sh" 2>/dev/null || true
+if grep -q '^AUTO_UPDATE=1' "$DEPLOY_DIR/.env"; then
+  printf '%s\n' "# Automatisches Update der Personaleinsatzplanung (mit Sicherung, Prüfung und automatischer Rückkehr bei Fehlern)" \
+    "30 4 * * * root $DEPLOY_DIR/auto-update.sh >> /var/log/dienstplan-update.log 2>&1" > /etc/cron.d/dienstplan-update
+  chmod 644 /etc/cron.d/dienstplan-update
+else
+  rm -f /etc/cron.d/dienstplan-update
+fi
+
 # --- Warten, bis die Seite antwortet -----------------------------------------
 blau "Warte auf das Programm und das HTTPS-Zertifikat …"
 OK=0
@@ -212,6 +233,7 @@ Nützliche Befehle (auf dem Server):
   Sicherungen:         $DEPLOY_DIR/data/backups/   (verschlüsselt, *.pep)
   Sicherung sofort:    $DEPLOY_DIR/backup-cron.sh
   Überwachung:         ${URL}api/health?backup=1   (siehe deploy/UEBERWACHUNG.md)
+  Automatische Updates: $(grep -q '^AUTO_UPDATE=1' "$DEPLOY_DIR/.env" && echo "an (nachts 4:30, Protokoll: /var/log/dienstplan-update.log)" || echo "aus (einschalten: AUTO_UPDATE=1 in .env, dann install.sh)")
 EOF
 if [ -n "$NEW_BACKUP_PW" ]; then
   echo

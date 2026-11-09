@@ -18,15 +18,28 @@ ANDROID_APP_SHA256=AA:BB:…
 
 `signing/dienstplan.jks` und das Passwort sind **nicht im Repository** (öffentlich!). Bewahren Sie beides sicher auf: Updates der App lassen sich nur mit demselben Schlüssel installieren.
 
-## Neu bauen
+## Automatisch bauen (GitHub Actions)
+
+Sobald sich etwas unter `android/` ändert, baut GitHub die App neu (`.github/workflows/android-app.yml`), signiert sie, prüft den Zertifikat-Fingerabdruck und legt `public/dienstplan.apk` + `public/app-version.json` ins Repository. Der Server liefert sie nach dem nächsten (nächtlichen) Update aus; wer eine ältere App hat, sieht darin „Neue App-Version verfügbar“.
+
+Einmalig einrichten – GitHub → Repository → **Settings → Secrets and variables → Actions → New repository secret**:
+
+| Name | Inhalt |
+|---|---|
+| `DIENSTPLAN_KEYSTORE_BASE64` | Inhalt von `signaturschluessel-base64.txt` |
+| `DIENSTPLAN_KEYSTORE_PASSWORD` | Passwort aus `signaturschluessel-LIESMICH.txt` |
+
+Ohne diese Einträge wird der Bau mit einem Hinweis übersprungen. Manuell starten: GitHub → **Actions → Android-App bauen → Run workflow**.
+
+## Neu bauen (von Hand)
 
 Voraussetzungen: JDK 17+, Android-SDK (Plattform 34, Build-Tools 34), Gradle 8.9+.
 
 ```bash
 cd android
 echo "sdk.dir=/pfad/zum/android-sdk" > local.properties
-DIENSTPLAN_KEYSTORE_PASSWORD=… gradle assembleRelease
-# Ergebnis: app/build/outputs/apk/release/app-release.apk → nach public/dienstplan.apk kopieren
+DIENSTPLAN_KEYSTORE_PASSWORD=… ./apk-bauen.sh 4 1.3     # versionCode, versionName
+# Ergebnis: public/dienstplan.apk und public/app-version.json
 ```
 
-Für eine neue Version `versionCode` in `app/build.gradle` erhöhen.
+Jede neue Version braucht einen höheren `versionCode` als die vorige.

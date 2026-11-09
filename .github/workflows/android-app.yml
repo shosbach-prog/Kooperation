@@ -1,0 +1,78 @@
+# Baut die Android-App automatisch neu, sobald sich etwas unter android/ ändert (oder per Hand: „Run workflow“).
+# Die signierte APK wird als public/dienstplan.apk + public/app-version.json zurück ins Repository geschrieben;
+# der Server liefert sie nach dem nächsten (automatischen) Update aus, die App zeigt dann „Neue Version verfügbar“.
+#
+# Einmalig einrichten (GitHub → Settings → Secrets and variables → Actions → New repository secret):
+#   DIENSTPLAN_KEYSTORE_BASE64    Inhalt der Datei „signaturschluessel-base64.txt“
+#   DIENSTPLAN_KEYSTORE_PASSWORD  Passwort aus „signaturschluessel-LIESMICH.txt“
+name: Android-App bauen
+
+on:
+  push:
+    branches: [main]
+    paths: ['android/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-app
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Signaturschlüssel vorhanden?
+        id: pruefen
+        env:
+          KS: ${{ secrets.DIENSTPLAN_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KS" ]; then
+            echo "::warning::Signaturschlüssel fehlt (Secret DIENSTPLAN_KEYSTORE_BASE64) – APK wird nicht gebaut."
+            echo "bauen=nein" >> "$GITHUB_OUTPUT"
+          else
+            echo "bauen=ja" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.pruefen.outputs.bauen == 'ja'
+
+      - uses: actions/setup-java@v4
+        if: steps.pruefen.outputs.bauen == 'ja'
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.pruefen.outputs.bauen == 'ja'
+        with:
+          gradle-version: '8.14.3'
+
+      - name: Android-SDK (Plattform 35)
+        if: steps.pruefen.outputs.bauen == 'ja'
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" > /dev/null
+
+      - name: APK bauen und signieren
+        if: steps.pruefen.outputs.bauen == 'ja'
+        env:
+          DIENSTPLAN_KEYSTORE_PASSWORD: ${{ secrets.DIENSTPLAN_KEYSTORE_PASSWORD }}
+          KS: ${{ secrets.DIENSTPLAN_KEYSTORE_BASE64 }}
+        run: |
+          mkdir -p android/signing
+          echo "$KS" | base64 -d > android/signing/dienstplan.jks
+          CODE=$((GITHUB_RUN_NUMBER + 3))
+          NAME="1.$((GITHUB_RUN_NUMBER + 2))"
+          GRADLE=gradle android/apk-bauen.sh "$CODE" "$NAME"
+          rm -f android/signing/dienstplan.jks
+          echo "NAME=$NAME" >> "$GITHUB_ENV"
+
+      - name: APK ins Repository schreiben
+        if: steps.pruefen.outputs.bauen == 'ja'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/dienstplan.apk public/app-version.json
+          git commit -m "Android-App ${NAME} automatisch gebaut" || exit 0
+          for i in 1 2 3; do git pull --rebase origin main && git push origin HEAD:main && break; sleep 5; done

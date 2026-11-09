@@ -420,3 +420,25 @@ test('Mehrzeilige Felder zeigen gespeicherte Inhalte (Einstellungen, Personalakt
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+test('Android-App: Hinweis auf neue App-Version', { skip }, async () => {
+  const neu = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, '..', 'public', 'app-version.json'), 'utf8'));
+  const { ctx, page, errors } = await open(DEVICES()['iPhone 13'], staff.state);
+  // App startet mit älterer Versionsnummer → Hinweis
+  await page.goto(`${url}?app=${neu.versionCode - 1}#plan`);
+  await page.waitForSelector('.app-update');
+  assert.match(await page.textContent('.app-update'), new RegExp(`Neue App-Version ${neu.versionName.replace('.', '\\.')}`));
+  assert.equal(new URL(page.url()).search, ''); // Versionsnummer wird aus der Adresse entfernt
+  assert.deepEqual(await H.axe(page), []);
+  await page.click('.app-update button');
+  assert.equal(await page.locator('.app-update').count(), 0);
+  // aktuelle App-Version → kein Hinweis
+  const c2 = await browser.newContext({ ...DEVICES()['iPhone 13'], storageState: staff.state });
+  const p2 = await c2.newPage();
+  await p2.goto(`${url}?app=${neu.versionCode}#plan`);
+  await p2.waitForSelector('#bottomnav button');
+  await p2.waitForTimeout(500);
+  assert.equal(await p2.locator('.app-update').count(), 0);
+  assert.deepEqual(errors, []);
+  await c2.close(); await ctx.close();
+});

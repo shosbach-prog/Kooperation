@@ -1,6 +1,9 @@
 plugins { id 'com.android.application' }
 
 def appUrl = project.findProperty('appUrl') ?: 'https://roboticstarter.de/lwl/'
+// Version kann beim automatischen Bau vorgegeben werden (GitHub Actions: -PversionCode=… -PversionName=…)
+def vCode = (project.findProperty('versionCode') ?: '3') as Integer
+def vName = project.findProperty('versionName') ?: '1.2'
 def appHost = new URI(appUrl).host
 def appPath = new URI(appUrl).path ?: '/'
 
@@ -11,10 +14,10 @@ android {
         applicationId 'de.roboticstarter.dienstplan'
         minSdk 21
         targetSdk 35
-        versionCode 2
-        versionName '1.1'
+        versionCode vCode
+        versionName vName
         manifestPlaceholders = [hostName: appHost, pathPrefix: appPath, launchUrl: appUrl]
-        resValue 'string', 'launchUrl', appUrl
+        resValue 'string', 'launchUrl', "${appUrl}?app=${vCode}"
         resValue 'string', 'assetStatements', """[{ "relation": ["delegate_permission/common.handle_all_urls"], "target": { "namespace": "web", "site": "https://${appHost}" } }]"""
     }
     signingConfigs {

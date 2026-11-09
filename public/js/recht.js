@@ -72,10 +72,37 @@ async function beispieldatenCard() {
 // ---------- Android-App ----------
 const inAndroidApp = (() => {
   try {
-    if (document.referrer.startsWith('android-app://')) sessionStorage.setItem('pep.inApp', '1');
+    const q = new URLSearchParams(location.search);
+    // Ab App-Version 3 übergibt die APK ihre Versionsnummer (?app=3); ältere Versionen erkennt man am Aufrufer
+    if (q.has('app')) {
+      localStorage.setItem('pep.appVersion', String(Number(q.get('app')) || 0));
+      sessionStorage.setItem('pep.inApp', '1');
+      q.delete('app');
+      history.replaceState(null, '', location.pathname + (q.toString() ? `?${q}` : '') + location.hash);
+    } else if (document.referrer.startsWith('android-app://')) {
+      sessionStorage.setItem('pep.inApp', '1');
+      if (!localStorage.getItem('pep.appVersion')) localStorage.setItem('pep.appVersion', '2');
+    }
     return sessionStorage.getItem('pep.inApp') === '1';
   } catch { return false; }
 })();
+
+/** In der Android-App: Hinweis, wenn eine neuere APK bereitsteht (wird automatisch gebaut, siehe .github/workflows) */
+async function appUpdateHinweis() {
+  if (!inAndroidApp) return;
+  try {
+    if (sessionStorage.getItem('pep.appUpdateZu') === '1') return;
+    const installiert = Number(localStorage.getItem('pep.appVersion')) || 0;
+    const neu = await fetch('app-version.json', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null));
+    if (!neu || !installiert || neu.versionCode <= installiert) return;
+    const leiste = h('div', { class: 'app-update', role: 'status' },
+      h('span', {}, `Neue App-Version ${neu.versionName} verfügbar.`),
+      h('a', { href: 'dienstplan.apk', download: `Dienstplan-${neu.versionName}.apk`, class: 'button' }, 'Herunterladen'),
+      h('button', { type: 'button', class: 'ghost tiny', 'aria-label': 'Hinweis schließen', onclick: () => { try { sessionStorage.setItem('pep.appUpdateZu', '1'); } catch { /* egal */ } leiste.remove(); } }, '✕'));
+    document.body.append(leiste);
+  } catch { /* ohne Netz: nichts anzeigen */ }
+}
+appUpdateHinweis();
 /** Hinweis „Android-App herunterladen“ – nur auf Android-Geräten im Browser, nicht in der App selbst */
 function androidAppHinweis() {
   if (inAndroidApp || !/Android/i.test(navigator.userAgent)) return null;

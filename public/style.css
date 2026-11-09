@@ -696,3 +696,8 @@ body.app #bottomnav { grid-auto-columns: minmax(0, 1fr); }
 @media (max-width: 759.98px) { .prot-zahlen { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem .6rem; } }
 .vk-zeile > * { min-width: 0; }
 .stepper-reihe input::placeholder { font-size: .8rem; font-weight: 400; }
+.app-update { position: fixed; left: .75rem; right: .75rem; bottom: calc(var(--bottomnav, 64px) + .75rem + env(safe-area-inset-bottom)); z-index: 70; display: flex; gap: .6rem; align-items: center; flex-wrap: wrap;
+  background: var(--primary); color: var(--primary-ink); padding: .6rem .8rem; border-radius: var(--radius); box-shadow: var(--shadow); }
+.app-update span { flex: 1; min-width: 10rem; }
+.app-update a.button { background: var(--primary-ink); color: var(--primary); padding: .45rem .8rem; border-radius: var(--radius-sm); text-decoration: none; font-weight: 700; }
+.app-update button { color: var(--primary-ink); border-color: transparent; }
