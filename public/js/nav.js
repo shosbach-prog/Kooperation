@@ -133,6 +133,7 @@ async function boot() {
     const { user, settings } = await api('GET', 'api/me');
     state.me = user; state.settings = settings;
   } catch (e) {
+    if (e.offline && offlineStempelMoeglich()) { renderOfflineStempel(); return; }
     if (e.code === 'STAGE_2FA') renderCodeStep();
     else if (e.code === 'STAGE_SETUP') renderSetup(false);
     else renderLogin();
@@ -154,6 +155,7 @@ async function boot() {
 document.getElementById('logout').replaceChildren(icon('logout'), h('span', { class: 'label' }, 'Abmelden'));
 document.getElementById('logout').setAttribute('aria-label', 'Abmelden');
 document.getElementById('logout').addEventListener('click', async () => {
+  stempelSpeicherLeeren();
   await api('POST', 'api/logout').catch(() => {});
   state.me = null; location.hash = ''; renderLogin();
 });

@@ -26,11 +26,24 @@ function h(tag, attrs = {}, ...children) {
 }
 
 async function api(method, url, body) {
-  const res = await fetch(url, {
-    method,
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : {},
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: body !== undefined ? { 'Content-Type': 'application/json' } : {},
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch (err) {
+    // kein Netz (Funkloch, Flugmodus): als „offline“ kennzeichnen
+    const e = new Error('Keine Verbindung zum Server.');
+    e.offline = true;
+    throw e;
+  }
+  if (res.status === 502 || res.status === 503 || res.status === 504) {
+    const e = new Error('Server gerade nicht erreichbar.');
+    e.offline = true;
+    throw e;
+  }
   const isJson = (res.headers.get('content-type') || '').includes('json');
   const data = isJson ? await res.json() : await res.text();
   if (!res.ok) {

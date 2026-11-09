@@ -300,3 +300,65 @@ test('Dienstplan-Personenansicht: Woche/Monat, Filter, Eintragen per Antippen', 
     await ctx.close();
   }
 });
+
+test('Stempeln ohne Netz: Warteschlange, Übertragung, App offline öffnen', { skip }, async () => {
+  // Dienst für Tobias, der gerade läuft
+  const m = await browser.newContext({ storageState: mgr.state });
+  const api = async (method, u, data) => (await m.request.fetch(`${url}${u}`, { method, data })).json();
+  const fmt = (ms) => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ms)).split(' ');
+  const [datum, beginn] = fmt(Date.now() - 30 * 60e3);
+  const typ = await api('POST', 'api/shift-types', { name: 'Offlinetest', code: 'OT', start_time: beginn, end_time: fmt(Date.now() + 6 * 3600e3)[1], break_min: 30, color: '#555555' });
+  const units = await api('GET', 'api/units');
+  await api('PUT', 'api/requirements', [0, 1, 2, 3, 4, 5, 6].map((w) => ({ unit_id: units[1].id, shift_type_id: typ.id, weekday: w, min_staff: 1 })));
+  await api('POST', 'api/shifts/generate', { from: datum, to: datum });
+  const shift = (await api('GET', `api/plan?from=${datum}&to=${datum}`)).shifts.find((x) => x.shift_type_id === typ.id);
+  const users = await api('GET', 'api/users');
+  await api('POST', `api/shifts/${shift.id}/assign`, { user_id: users.find((u) => u.username === 'twagner').id, force: true });
+  await m.close();
+
+  // localhost: Service Worker (App-Hülle offline) nur in sicherem Kontext
+  const host = url.replace('127.0.0.1', 'localhost');
+  const julia = await H.loginState(browser, host, 'twagner', 'demo123');
+  const { ctx, page, errors } = await open(DEVICES()['iPhone 13'], julia.state);
+  await page.goto(`${host}#stempel`);
+  await page.waitForSelector('button.stempel-btn.kommen:not([disabled])');
+  await page.evaluate(() => navigator.serviceWorker.ready);
+
+  // Funkloch: Kommen und Raucherpause werden gespeichert
+  await ctx.setOffline(true);
+  await page.click('button.stempel-btn.kommen');
+  await page.waitForSelector('.stempel-offline');
+  assert.match(await page.textContent('.stempel-offline'), /1 Stempelung/);
+  await page.waitForSelector('.stempel-status.an');
+  await page.click('button.stempel-btn.raucher');
+  await page.waitForSelector('.stempel-status.pause');
+  assert.match(await page.textContent('.stempel-offline'), /2 Stempelungen/);
+  assert.deepEqual(await H.axe(page), []);
+
+  // App offline neu öffnen: Stempeluhr mit gespeichertem Stand
+  await page.reload();
+  await page.waitForSelector('.offline-seite .stempeluhr');
+  assert.match(await page.textContent('.stempeluhr'), /Raucherpause/);
+  await page.click('button.stempel-btn.weiter');
+  await page.waitForSelector('.stempel-status.an');
+
+  // Netz wieder da: alles wird übertragen, Server kennt die Stempelung
+  await ctx.setOffline(false);
+  // die App merkt das Netz von selbst, überträgt und startet normal
+  await page.waitForSelector('#bottomnav button:not([hidden])', { timeout: 15000 }).catch(async () => {
+    await page.click('.offline-seite button:has-text("Erneut verbinden")');
+    await page.waitForSelector('#bottomnav button');
+  });
+  await page.goto(`${host}#stempel`);
+  await page.waitForSelector('.stempel-status.an');
+  await page.waitForFunction(() => !document.querySelector('.stempel-offline'));
+  const status = await page.evaluate(() => fetch('api/stempel').then((r) => r.json()));
+  assert.ok(status.laufend, 'auf dem Server eingestempelt');
+  assert.equal(status.laufend.pausen.length, 1);
+  assert.equal(status.laufend.pausen[0].art, 'raucher');
+  assert.ok(status.laufend.pausen[0].ende_at);
+  // Abmelden löscht den Zwischenspeicher
+  await page.click('#bottomnav button:has-text("Menü")');
+  assert.deepEqual(errors.filter((e) => !/Failed to fetch|NetworkError/.test(e)), []);
+  await ctx.close();
+});

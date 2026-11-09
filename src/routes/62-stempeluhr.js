@@ -22,6 +22,29 @@ module.exports = (app, ctx) => {
   const hmRound = (ms) => wall(ms + 30000).hm; // auf die Minute gerundet
   const MIN = 60000;
 
+  /**
+   * Zeitpunkt einer Stempelung. Offline erfasste Stempelungen werden später übertragen:
+   * offline_at = Handyuhr beim Stempeln, gesendet_at = Handyuhr beim Senden → Abweichung der Handyuhr wird herausgerechnet.
+   * Höchstens 24 Std. zurück; doppelt gesendete (gleiche offline_id) werden ignoriert.
+   */
+  const zeitpunkt = (req, nichtVor = 0) => {
+    const b = req.body || {};
+    if (b.offline_at === undefined) return { t: now(), offline: false };
+    const at = Number(b.offline_at), sent = Number(b.gesendet_at);
+    if (!Number.isFinite(at) || !Number.isFinite(sent) || at > sent + 1000) throw new HttpError(400, 'Ungültige Offline-Zeit.');
+    const t = now() - (sent - at);
+    if (now() - t > 24 * 3600e3) throw new HttpError(400, 'Offline-Stempelungen können nur bis 24 Std. nachträglich übertragen werden.', 'ZU_ALT');
+    return { t: Math.max(t, nichtVor), offline: true };
+  };
+  const schonGesehen = (req) => {
+    const id = req.body?.offline_id;
+    if (!id) return false;
+    if (!/^[\w-]{8,64}$/.test(String(id))) throw new HttpError(400, 'Ungültige Offline-Kennung.');
+    const r = db.prepare('INSERT OR IGNORE INTO stempel_offline_ids (id, user_id) VALUES (?, ?)').run(String(id), req.user.id);
+    return !r.changes;
+  };
+  const letzteZeit = (o) => Math.max(o.kommen_at, ...pausenVon(o.id).flatMap((p) => [p.start_at, p.ende_at || 0]));
+
   const pausenVon = (id) => db.prepare('SELECT * FROM stempel_pausen WHERE stempel_id = ? ORDER BY start_at').all(id);
   const offen = (userId) => db.prepare('SELECT * FROM stempel WHERE user_id = ? AND gehen_at IS NULL ORDER BY id DESC LIMIT 1').get(userId);
 
@@ -137,9 +160,10 @@ module.exports = (app, ctx) => {
   app.get('/api/stempel', auth, wrap((req) => statusFor(req.user.id)));
 
   app.post('/api/stempel/kommen', auth, wrap((req) => {
-    const t = now();
+    if (schonGesehen(req)) return statusFor(req.user.id);
+    const { t, offline } = zeitpunkt(req);
     const o = offen(req.user.id);
-    if (o) throw new HttpError(409, o && t - o.kommen_at > 16 * 3600e3
+    if (o) throw new HttpError(409, o && now() - o.kommen_at > 16 * 3600e3
       ? 'Sie sind seit über 16 Std. eingestempelt – bitte zuerst „Gehen“ mit der tatsächlichen Uhrzeit nachtragen.'
       : 'Sie sind bereits eingestempelt.', 'OFFEN');
     const s = req.body?.shift_id ? db.prepare('SELECT s.* FROM shifts s JOIN assignments a ON a.shift_id = s.id WHERE s.id = ? AND a.user_id = ?').get(Number(req.body.shift_id), req.user.id) : findShift(req.user.id, t);
@@ -150,7 +174,7 @@ module.exports = (app, ctx) => {
       if (sh) db.prepare('INSERT OR IGNORE INTO assignments (shift_id, user_id, created_by) VALUES (?, ?, ?)').run(sh.id, req.user.id, req.user.id);
     }
     if (!sh) throw new HttpError(400, 'Für jetzt ist kein Dienst für Sie geplant. Bitte tragen Sie sich zuerst im Dienstplan ein (z. B. beim Einspringen).', 'KEIN_DIENST');
-    db.prepare('INSERT INTO stempel (user_id, shift_id, kommen_at) VALUES (?, ?, ?)').run(req.user.id, sh.id, t);
+    db.prepare('INSERT INTO stempel (user_id, shift_id, kommen_at, offline) VALUES (?, ?, ?, ?)').run(req.user.id, sh.id, t, offline ? 1 : 0);
     audit(req.user.id, 'stempel.kommen', { shift_id: sh.id, zeit: wall(t).hms });
     return statusFor(req.user.id);
   }));
@@ -162,25 +186,34 @@ module.exports = (app, ctx) => {
   };
 
   app.post('/api/stempel/pause', auth, wrap((req) => {
+    if (schonGesehen(req)) return statusFor(req.user.id);
     const o = needOffen(req.user.id);
+    const { t, offline } = zeitpunkt(req, letzteZeit(o));
+    if (offline) db.prepare('UPDATE stempel SET offline = 1 WHERE id = ?').run(o.id);
     const art = req.body?.art === 'raucher' ? 'raucher' : 'pause';
     if (db.prepare('SELECT 1 FROM stempel_pausen WHERE stempel_id = ? AND ende_at IS NULL').get(o.id)) throw new HttpError(409, 'Es läuft bereits eine Pause.', 'PAUSE_LAEUFT');
-    db.prepare('INSERT INTO stempel_pausen (stempel_id, art, start_at) VALUES (?, ?, ?)').run(o.id, art, now());
+    db.prepare('INSERT INTO stempel_pausen (stempel_id, art, start_at) VALUES (?, ?, ?)').run(o.id, art, t);
     audit(req.user.id, art === 'raucher' ? 'stempel.raucherpause' : 'stempel.pause', {});
     return statusFor(req.user.id);
   }));
 
   app.post('/api/stempel/weiter', auth, wrap((req) => {
+    if (schonGesehen(req)) return statusFor(req.user.id);
     const o = needOffen(req.user.id);
-    const r = db.prepare('UPDATE stempel_pausen SET ende_at = ? WHERE stempel_id = ? AND ende_at IS NULL').run(now(), o.id);
+    const { t, offline } = zeitpunkt(req, letzteZeit(o));
+    if (offline) db.prepare('UPDATE stempel SET offline = 1 WHERE id = ?').run(o.id);
+    const r = db.prepare('UPDATE stempel_pausen SET ende_at = ? WHERE stempel_id = ? AND ende_at IS NULL').run(t, o.id);
     if (!r.changes) throw new HttpError(400, 'Es läuft keine Pause.');
     return statusFor(req.user.id);
   }));
 
   app.post('/api/stempel/gehen', auth, wrap((req) => {
+    if (schonGesehen(req)) return statusFor(req.user.id);
     const o = needOffen(req.user.id);
-    let t = now();
+    const zp = zeitpunkt(req, letzteZeit(o));
+    let t = zp.t;
     let korrigiert = 0;
+    if (zp.offline) db.prepare('UPDATE stempel SET offline = 1 WHERE id = ?').run(o.id);
     // vergessenes Ausstempeln: Uhrzeit nachtragen (nur wenn seit über 12 Std. eingestempelt)
     if (req.body?.zeit) {
       if (t - o.kommen_at < 12 * 3600e3) throw new HttpError(400, 'Eine Uhrzeit kann nur nachgetragen werden, wenn das Ausstempeln vergessen wurde.');
@@ -211,7 +244,7 @@ module.exports = (app, ctx) => {
   /** Einzelheiten für die Zeiterfassung (Verwaltung und eigene Ansicht) */
   ctx.stempelDetails = (userId, shiftId) => db.prepare('SELECT * FROM stempel WHERE user_id = ? AND shift_id = ? ORDER BY kommen_at').all(userId, shiftId)
     .map((s) => ({
-      kommen: wall(s.kommen_at).hms, gehen: s.gehen_at ? wall(s.gehen_at).hms : null, nachgetragen: !!s.korrigiert,
+      kommen: wall(s.kommen_at).hms, gehen: s.gehen_at ? wall(s.gehen_at).hms : null, nachgetragen: !!s.korrigiert, offline: !!s.offline,
       pausen: pausenVon(s.id).map((p) => ({ art: p.art, von: wall(p.start_at).hms, bis: p.ende_at ? wall(p.ende_at).hms : null, min: p.ende_at ? Math.round((p.ende_at - p.start_at) / MIN) : null })),
     }));
   ctx.stempelSummary = summary;

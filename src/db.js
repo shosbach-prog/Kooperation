@@ -436,6 +436,8 @@ function migrate(db) {
   add('assignments', 'ist_by INTEGER');
   add('assignments', 'ist_at TEXT');
   add('assignments', 'einsatz_std REAL');
+  add('stempel', 'offline INTEGER NOT NULL DEFAULT 0');
+  db.exec('CREATE TABLE IF NOT EXISTS stempel_offline_ids (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, at TEXT NOT NULL DEFAULT (datetime(\'now\')))');
   add('assignments', 'ist_raucher_min INTEGER');
   add('assignments', "ist_quelle TEXT NOT NULL DEFAULT ''");
   // Dienstarten: normaler Dienst, Bereitschaftsdienst (Bewertung in %), Rufbereitschaft

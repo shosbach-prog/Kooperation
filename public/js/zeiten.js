@@ -57,7 +57,7 @@ function zeitenTable(list, { withName, rerender }) {
         z.ist_quelle === 'stempel' ? h('div', {}, h('span', { class: 'badge ok' }, '⏱ Stempeluhr')) : z.ist_quelle === 'manuell' && z.stempel?.length ? h('div', {}, h('span', { class: 'badge warn' }, 'Stempelzeit geändert')) : null,
         z.ist_raucher_min ? h('div', { class: 'small muted' }, `davon Raucherpausen ${z.ist_raucher_min} Min.`) : null,
         z.stempel?.length ? h('ul', { class: 'zeit-stempel' }, z.stempel.map((st) => h('li', {},
-          `Kommen ${st.kommen} – Gehen ${st.gehen || 'läuft'}${st.nachgetragen ? ' (nachgetragen)' : ''}`,
+          `Kommen ${st.kommen} – Gehen ${st.gehen || 'läuft'}${st.nachgetragen ? ' (nachgetragen)' : ''}${st.offline ? ' · offline erfasst' : ''}`,
           st.pausen.map((p) => h('div', {}, `${p.art === 'raucher' ? 'Raucherpause' : 'Pause'} ${p.von}–${p.bis || '…'}${p.min !== null ? ` (${p.min} Min.)` : ''}`))))) : null,
         z.ist_note ? h('div', { class: 'small muted' }, z.ist_note) : null,
         z.ist_by_name && z.ist_by_name !== z.name ? h('div', { class: 'small muted' }, `erfasst von ${z.ist_by_name}`) : null),

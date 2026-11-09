@@ -75,6 +75,7 @@ function demoWho() {
   document.body.classList.toggle('demo', isDemo());
   if (!isDemo()) return null;
   return h('button', { type: 'button', class: 'ghost tiny demo-switch', title: 'Demo: andere Rolle wählen', 'aria-label': 'Demo: Rolle wechseln', onclick: async () => {
+    stempelSpeicherLeeren();
     await api('POST', 'api/logout').catch(() => {});
     state.me = null; location.hash = ''; renderLogin();
   } }, h('span', { class: 'demo-lang', 'aria-hidden': 'true' }, 'Demo · Rolle wechseln'), h('span', { class: 'demo-kurz', 'aria-hidden': 'true' }, 'Demo ⇄'));

@@ -119,6 +119,24 @@ test('Stempeluhr: Kommen, Pause, Raucherpausen, Gehen → genaue Ist-Zeiten', as
   assert.equal(z2.stempel.length, 2);
   assert.equal(z2.stempel[1].nachgetragen, true);
 
+  // Offline erfasst: Handyuhr geht 5 Min. vor; gestempelt um 590/600, übertragen um 620
+  const handy = (min) => T0 + (min + 5) * MIN;
+  at(620);
+  r = await st('POST', '/api/stempel/kommen', { offline_at: handy(590), gesendet_at: handy(620), offline_id: 'off-kommen-1' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.laufend.kommen_at, T0 + 590 * MIN);
+  // doppelt gesendet → ignoriert
+  assert.equal((await st('POST', '/api/stempel/kommen', { offline_at: handy(590), gesendet_at: handy(621), offline_id: 'off-kommen-1' })).status, 200);
+  r = await st('POST', '/api/stempel/gehen', { offline_at: handy(600), gesendet_at: handy(620), offline_id: 'off-gehen-1' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const z3 = (await st('GET', '/api/zeiten?mine=1&from=' + datum + '&to=' + datum)).data.zeiten.find((x) => x.shift_id === shift.id);
+  const off = z3.stempel.find((x) => x.offline);
+  assert.ok(off, 'offline erfasste Stempelung gekennzeichnet');
+  assert.equal(off.gehen, wall(T0 + 600 * MIN)[1] + ':00');
+  // zu alt
+  at(620 + 25 * 60);
+  assert.equal((await st('POST', '/api/stempel/kommen', { offline_at: handy(620), gesendet_at: handy(620 + 25 * 60), offline_id: 'off-alt-1' })).data.code, 'ZU_ALT');
+
   // ohne geplanten Dienst kein Einstempeln
   at(3 * 24 * 60);
   assert.equal((await st('POST', '/api/stempel/kommen')).data.code, 'KEIN_DIENST');
