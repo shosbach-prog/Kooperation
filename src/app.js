@@ -825,12 +825,49 @@ function createApp(db, opts = {}) {
     LEFT JOIN units u ON u.id = r.unit_id LEFT JOIN shift_types st ON st.id = r.shift_type_id ORDER BY r.qualification`).all();
 
   /** Fehlende Qualifikationen einer Schicht; optional ohne eine bestimmte Person (für Austragen) */
+  /**
+   * Welche Qualifikation darf welche vertreten? Einstellung „qualifikation_vertretung“, je Zeile „A > B“
+   * (A kann B vertreten, z. B. „Pflegefachkraft > Pflegehilfskraft“); transitiv.
+   */
+  const vertretung = () => {
+    const direkt = new Map();
+    for (const z of getSettings().qualifikation_vertretung || []) {
+      const [a, b] = String(z).split('>').map((x) => x.trim());
+      if (a && b) { if (!direkt.has(a)) direkt.set(a, new Set()); direkt.get(a).add(b); }
+    }
+    const kann = (von, fuer) => {
+      if (von === fuer) return true;
+      const gesehen = new Set([von]); const offen = [von];
+      while (offen.length) { for (const n of direkt.get(offen.pop()) || []) { if (n === fuer) return true; if (!gesehen.has(n)) { gesehen.add(n); offen.push(n); } } }
+      return false;
+    };
+    return kann;
+  };
+  /**
+   * Deckung der Qualifikationsanforderungen; jede Person zählt nur einmal.
+   * Reihenfolge: erst Anforderungen, die niemand vertreten kann, dann der Rest; je Anforderung zuerst passende Qualifikation, dann Vertretung.
+   */
+  const qualDeckung = (people, needs) => {
+    const kann = vertretung();
+    const frei = [...people];
+    const quals = [...needs.keys()].sort((a, b) => frei.filter((p) => kann(p.qualification, a)).length - frei.filter((p) => kann(p.qualification, b)).length);
+    const out = [];
+    for (const q of quals) {
+      const need = needs.get(q);
+      let have = 0;
+      for (const exakt of [true, false]) {
+        for (let i = 0; i < frei.length && have < need;) {
+          const p = frei[i];
+          if (exakt ? p.qualification === q : kann(p.qualification, q)) { frei.splice(i, 1); have++; } else i++;
+        }
+      }
+      out.push({ qualification: q, need, have });
+    }
+    return out;
+  };
   const qualMissing = (shift, assigned, rules, withoutUserId = null) => {
     const people = assigned.filter((a) => a.user_id !== withoutUserId);
-    return rules
-      .filter((r) => (r.unit_id === null || r.unit_id === shift.unit_id) && (r.shift_type_id === null || r.shift_type_id === shift.shift_type_id))
-      .map((r) => ({ qualification: r.qualification, need: r.min_count, have: people.filter((p) => p.qualification === r.qualification).length }))
-      .filter((x) => x.have < x.need);
+    return qualDeckung(people, qualNeeds(shift, rules)).filter((x) => x.have < x.need);
   };
 
   app.get('/api/qual-rules', auth, manager, wrap(() => loadRules()));
@@ -892,8 +929,7 @@ function createApp(db, opts = {}) {
       people.push(...list);
       for (const [q, n] of qualNeeds(m, rules)) needs.set(q, (needs.get(q) || 0) + n);
     }
-    const qual_missing = [...needs].map(([qualification, need]) => ({ qualification, need, have: people.filter((p) => p.qualification === qualification).length }))
-      .filter((x) => x.have < x.need);
+    const qual_missing = qualDeckung(people, needs).filter((x) => x.have < x.need);
     return {
       besetzt, min, qual_missing, gedeckt: besetzt >= min && qual_missing.length === 0,
       stationen: members.map((m) => ({
@@ -1636,7 +1672,7 @@ function createApp(db, opts = {}) {
   const ctx = {
     db, T, TOTP, HttpError, auth, manager, wrap, audit, getSettings, isoDate, isTime, nowLocalMs, todayIso,
     hasMgr, isHaupt, publicUser, loadShifts, loadRules, qualMissing, verbundGroup, checkConflicts, absenceOn, uploadDir, express,
-    hooks, shiftLabel, managerIds, decorateAbsence, timers: opts.timers !== false, backupDir: opts.backupDir || null, startSession, checkLock, registerFail, resetFails, demo: demoMode, hashPassword, clock: opts.clock || (() => Date.now()),
+    hooks, shiftLabel, managerIds, decorateAbsence, timers: opts.timers !== false, backupDir: opts.backupDir || null, startSession, checkLock, registerFail, resetFails, demo: demoMode, hashPassword, qualKann: vertretung, clock: opts.clock || (() => Date.now()),
     scopeOf, inScope, userInScope, requireUnit, requireUser, managerFull, arbzgCheck, report,
   };
   for (const name of fs.readdirSync(path.join(__dirname, 'routes')).filter((f) => f.endsWith('.js')).sort()) {

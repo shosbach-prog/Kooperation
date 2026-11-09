@@ -106,7 +106,7 @@ module.exports = (app, ctx) => {
     const qual = String(req.body?.qualification || '');
     const kandidaten = db.prepare("SELECT * FROM users WHERE active = 1 AND role = 'staff' AND (austritt = '' OR austritt >= ?)").all(s.date)
       .filter((u) => !s.assigned.some((a) => a.user_id === u.id))
-      .filter((u) => !qual || u.qualification === qual)
+      .filter((u) => !qual || (ctx.qualKann ? ctx.qualKann()(u.qualification, qual) : u.qualification === qual))
       .filter((u) => !absenceOn(u.id, s.date))
       .filter((u) => !checkConflicts(s, u.id, settings));
     const note = String(req.body?.note || '').trim().slice(0, 300);

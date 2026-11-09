@@ -61,7 +61,8 @@ async function qualRulesCard(units, types) {
   const count = h('input', { type: 'number', min: 1, step: 1, value: 1 });
   return h('div', { class: 'card' }, h('h2', {}, 'Mindestbesetzung nach Qualifikation'),
     h('p', { class: 'muted' }, 'Zusätzliche Regeln je Dienst, z. B. „In jedem Nachtdienst mindestens 1 Pflegefachkraft“. ',
-      'Schichten, die eine Regel nicht erfüllen, werden rot markiert; Mitarbeitende können sich dann nicht austragen, wenn dadurch die Regel verletzt würde.'),
+      'Schichten, die eine Regel nicht erfüllen, werden rot markiert; Mitarbeitende können sich dann nicht austragen, wenn dadurch die Regel verletzt würde. ',
+      'Höhere Qualifikationen können niedrigere vertreten (Einstellungen → „Wer darf wen vertreten?“), z. B. zählt eine Pflegefachkraft auch als Pflegehilfskraft – jede Person aber nur einmal.'),
     rules.length ? h('table', {}, h('thead', {}, h('tr', {}, ['Bereich', 'Dienst', 'Qualifikation', 'mindestens', ''].map((x) => h('th', {}, x)))),
       h('tbody', {}, rules.map((r) => h('tr', {}, h('td', {}, r.unit_name || 'alle'), h('td', {}, r.type_name || 'alle'), h('td', {}, r.qualification),
         h('td', {}, r.min_count), h('td', {}, h('button', { class: 'tiny danger', onclick: async () => {
@@ -159,6 +160,7 @@ async function renderSettings() {
     ['urlaubstage_standard', 'Urlaubstage pro Jahr (Standard für neue Mitarbeitende)', 'number', 'TVöD § 26: 30 Arbeitstage bei 5-Tage-Woche'],
     ['au_ab_tag', 'AU-Bescheinigung erforderlich ab Krankheitstag', 'number', 'EFZG § 5: ab dem 4. Kalendertag; 1 = ab dem ersten Tag'],
     ['qualifikationen', 'Qualifikationen (eine pro Zeile)', 'list'],
+    ['qualifikation_vertretung', 'Wer darf wen vertreten? (eine Regel pro Zeile, „A > B“ = A zählt auch als B)', 'list', 'z. B. „Pflegefachkraft > Pflegehilfskraft“. Wirkt auf die Mindestbesetzung nach Qualifikation; jede Person zählt nur einmal.'],
     ['lohnarten', 'Lohnart-Nummern für die Lohn-Übergabe (Schlüssel=Nummer, eine pro Zeile)', 'list', 'Mit der Entgeltabrechnung abstimmen. Schlüssel: stunden, ueberstunden, nacht, samstag, sonntag, feiertag, vorfest, zuschlaege_eur, zulage, bereitschaft, ruf_pauschale, ruf_einsatz, urlaub_tage, krank_tage, sonder_tage, fortbildung_tage, unbezahlt_tage'],
     ['ruhezeit_std', 'Mindestruhezeit zwischen zwei Diensten (Std.)', 'number', '§ 5 ArbZG: 11 Std.; in Krankenhäusern unter Bedingungen 10 Std.'],
     ['nacht_von', 'Nachtarbeit von', 'time'], ['nacht_bis', 'Nachtarbeit bis', 'time', 'TVöD § 7 Abs. 5: 21–6 Uhr'],

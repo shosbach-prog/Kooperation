@@ -21,6 +21,8 @@ const DEFAULT_SETTINGS = {
   zuschlag_vorfest: 35,
   zuschlag_samstag: 20,
   samstag_bei_schichtarbeit: false,
+  // Wer darf wen vertreten (für die Mindestbesetzung nach Qualifikation): „A > B“ = A zählt auch als B
+  qualifikation_vertretung: ['Pflegefachkraft > Pflegehilfskraft', 'Stationsleitung > Pflegefachkraft'],
   qualifikationen: ['Pflegefachkraft', 'Pflegehilfskraft', 'Auszubildende/r', 'Stationsleitung', 'Arzt/Ärztin', 'Psychologe/Psychologin', 'Therapeut/in'],
   begruendung_eintragen: false,
   begruendung_austragen: true,

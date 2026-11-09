@@ -214,7 +214,8 @@ test('Benachrichtigungen: Ereignisse, Push-Abo, Rundruf, AU-Erinnerung', async (
   const julia = await as('jschmitz');
   assert.ok(!(await unread(julia)).items.some((x) => x.art === 'rundruf'));        // krank
   // nur mit Qualifikation
-  const r2 = await mgr('POST', `/api/shifts/${n2.id}/rundruf`, { qualification: 'Pflegehilfskraft' });
+  // gezielt Fachkräfte suchen: Hilfskräfte werden nicht angeschrieben (Fachkräfte vertreten Hilfskräfte, nicht umgekehrt)
+  const r2 = await mgr('POST', `/api/shifts/${n2.id}/rundruf`, { qualification: 'Pflegefachkraft' });
   assert.ok(r2.data.empfaenger < empf);
 
   // AU-Erinnerung: Krankmeldung über 5 Tage ab vor 6 Tagen ohne Bescheinigung → genau einmal erinnern
@@ -719,4 +720,34 @@ test('Beispieldaten entfernen (nur Demo-Personen, nur Hauptverwaltung)', async (
   assert.ok(!rest.includes('abecker'));
   assert.equal((await anna('GET', '/api/me')).status, 401); // Sitzung beendet
   assert.deepEqual((await mgr('GET', '/api/admin/beispieldaten')).data.personen, []);
+});
+
+test('Qualifikation vertritt: Pflegefachkraft zählt als Pflegehilfskraft, aber nur einmal', async () => {
+  const d = day(60);
+  const s = await shiftOn(d, 'S', 'Station 2');
+  const pfk = (await mgr('POST', '/api/users', { username: 'qv-pfk', name: 'QV Fachkraft', password: 'demo12345', role: 'staff', qualification: 'Pflegefachkraft' })).data.id;
+  const rule = (await mgr('POST', '/api/qual-rules', { unit_id: s.unit_id, shift_type_id: s.shift_type_id, qualification: 'Pflegehilfskraft', min_count: 1 })).data;
+  const ruleId = rule.find((r) => r.qualification === 'Pflegehilfskraft' && r.unit_id === s.unit_id).id;
+  try {
+    // alle anderen austragen, nur die Fachkraft eintragen
+    for (const a of s.assigned) await mgr('DELETE', `/api/shifts/${s.id}/assign?user_id=${a.user_id}`, { reason: 'Test' });
+    await mgr('POST', `/api/shifts/${s.id}/assign`, { user_id: pfk, force: true });
+    const get = async () => (await mgr('GET', `/api/plan?from=${d}&to=${d}`)).data.shifts.find((x) => x.id === s.id);
+    let x = await get();
+    // globale Regel „1 Pflegefachkraft“ + Stationsregel „1 Pflegehilfskraft“: eine Fachkraft deckt nur eine davon
+    assert.deepEqual(x.qual_missing.map((q) => q.qualification), ['Pflegehilfskraft']);
+    // ohne Vertretungsregel und nur mit der Hilfskraft-Regel: Fachkraft zählt nicht
+    await mgr('PUT', '/api/settings', { qualifikation_vertretung: [] });
+    x = await get();
+    assert.ok(x.qual_missing.some((q) => q.qualification === 'Pflegehilfskraft'));
+    await mgr('PUT', '/api/settings', { qualifikation_vertretung: ['Pflegefachkraft > Pflegehilfskraft'] });
+    // zweite Fachkraft: jetzt sind beide Regeln erfüllt (eine als Fachkraft, eine vertritt die Hilfskraft)
+    const pfk2 = (await mgr('POST', '/api/users', { username: 'qv-pfk2', name: 'QV Fachkraft 2', password: 'demo12345', role: 'staff', qualification: 'Pflegefachkraft' })).data.id;
+    await mgr('POST', `/api/shifts/${s.id}/assign`, { user_id: pfk2, force: true });
+    x = await get();
+    assert.deepEqual(x.qual_missing, []);
+  } finally {
+    await mgr('DELETE', `/api/qual-rules/${ruleId}`);
+    await mgr('PUT', '/api/settings', { qualifikation_vertretung: ['Pflegefachkraft > Pflegehilfskraft', 'Stationsleitung > Pflegefachkraft'] });
+  }
 });
