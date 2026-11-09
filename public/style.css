@@ -688,3 +688,11 @@ body.app #bottomnav { grid-auto-columns: minmax(0, 1fr); }
 .pegel { display: inline-block; width: 120px; height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; vertical-align: middle; margin-left: .5rem; }
 .pegel > span { display: block; height: 100%; width: 0; background: var(--ok); transition: width .1s linear; }
 .aufnahme-punkt { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: var(--bad); animation: puls 1.2s ease-in-out infinite; vertical-align: middle; }
+/* Plus/Minus-Felder: Zahlenfeld darf schrumpfen (Browser geben Zahlenfeldern sonst eine feste Mindestbreite) */
+.prot-zahlen { grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); }
+.stepper-reihe { grid-template-columns: 44px minmax(0, 1fr) 44px; }
+.stepper-reihe input { width: 100%; min-width: 0; }
+.stepper-reihe button { min-width: 0; width: 44px; }
+@media (max-width: 759.98px) { .prot-zahlen { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem .6rem; } }
+.vk-zeile > * { min-width: 0; }
+.stepper-reihe input::placeholder { font-size: .8rem; font-weight: 400; }

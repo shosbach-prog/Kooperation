@@ -11,7 +11,7 @@ const { version } = require('../../package.json');
 module.exports = (app, ctx) => {
   const started = Date.now();
   app.get('/api/health', (req, res) => {
-    const out = { status: 'ok', version, laufzeit_std: Math.round((Date.now() - started) / 360e3) / 10 };
+    const out = { status: 'ok', version, laufzeit_std: Math.round((Date.now() - started) / 360e3) / 10, arbeitsspeicher_gb: Math.round(require('os').totalmem() / 1024 ** 3 * 10) / 10 };
     let ok = true;
     try { ctx.db.prepare('SELECT COUNT(*) AS n FROM settings').get(); out.datenbank = 'ok'; } catch { out.datenbank = 'fehler'; ok = false; }
     try {

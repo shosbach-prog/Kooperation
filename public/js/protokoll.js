@@ -132,6 +132,7 @@ function diktierKnopf(cloudErlaubt, onFertig, { label = '🎤 Diktieren', klein 
       } catch (e) { toast(e.message, true); return; }
       btn.classList.add('aktiv'); btn.textContent = '⏹ Fertig'; box.classList.add('laeuft');
       anzeige.replaceChildren(h('span', { class: 'aufnahme-punkt', 'aria-hidden': 'true' }), ' Aufnahme läuft ', zeit, pegel,
+        h('div', { class: 'small' }, 'Tipp: Handy ca. 20 cm vor den Mund, ruhig und deutlich sprechen, kurze Sätze („Belegung 18. Zwei Zugänge.“).'),
         h('div', { class: 'small muted' }, 'Erkennung auf dem Klinik-Server – die Aufnahme verlässt den Server nicht und wird nicht gespeichert.'));
       lauf = {
         stop: async () => {
@@ -217,7 +218,7 @@ async function renderProtokolle() {
 
 // ---------- Protokoll eines Dienstes ----------
 function stepper(label, wert, onChange) {
-  const input = h('input', { type: 'number', min: 0, max: 999, inputmode: 'numeric', value: wert ?? '', 'aria-label': label, placeholder: '–' });
+  const input = h('input', { type: 'number', min: 0, max: 999, inputmode: 'numeric', value: wert ?? '', 'aria-label': label, placeholder: 'leer' });
   input.addEventListener('input', () => onChange(input.value === '' ? null : Number(input.value)));
   const plus = (d) => () => { const v = Math.max(0, (Number(input.value) || 0) + d); input.value = v; onChange(v); };
   return h('div', { class: 'stepper' }, h('span', { class: 'stepper-label' }, label),

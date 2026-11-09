@@ -52,10 +52,21 @@ async function axe(page) {
 
 /** Seitenbreite und Tippflächen prüfen */
 async function layoutProblems(page) {
+  // zwei Bildschirm-Aktualisierungen abwarten (Tabellen werden per requestAnimationFrame in Karten umgebaut)
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
   return page.evaluate(() => {
     const W = window.innerWidth;
     const out = [];
     if (document.documentElement.scrollWidth - W > 0) out.push(`horizontaler Überlauf ${document.documentElement.scrollWidth - W}px`);
+    // abgeschnittene Bedienelemente: ragen über ihre Karte hinaus (die Karte schneidet ab, die Seite bleibt schmal)
+    for (const card of document.querySelectorAll('.card')) {
+      const cr = card.getBoundingClientRect();
+      for (const el of card.querySelectorAll('button, input, select, textarea')) {
+        if (el.closest('.table-wrap, .plan-scroll, dialog')) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width && r.right > cr.right + 1) { out.push(`abgeschnitten: ${el.tagName} „${(el.getAttribute('aria-label') || el.textContent || el.name || '').trim().slice(0, 20)}“ (${Math.round(r.right - cr.right)}px)`); break; }
+      }
+    }
     // versehentlich ausgegebene leere Werte
     const t = document.body.innerText;
     const m = t.match(/(^|[\s(])(null|undefined|NaN)([\s).,]|$)/);

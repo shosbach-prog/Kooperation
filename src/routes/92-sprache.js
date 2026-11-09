@@ -6,8 +6,9 @@
  * Funktioniert damit in jedem Browser (Brave, Firefox, Safari, Chrome) und in der Android-App.
  *
  * .env:  SPRACHE=0               ausschalten
- *        SPRACHE_MODELL=…         Standard: onnx-community/whisper-small (bei < 3 GB RAM: whisper-base)
- * Das Modell (~250 MB) wird beim ersten Start einmalig geladen und im Datenordner zwischengespeichert.
+ *        SPRACHE_MODELL=…         Standard nach Arbeitsspeicher: ab 8 GB whisper-large-v3-turbo (sehr genau, ~1,1 GB Download),
+ *                                 ab 3 GB whisper-small (~250 MB), darunter whisper-base
+ * Das Modell wird beim ersten Start einmalig geladen und im Datenordner zwischengespeichert.
  */
 const os = require('os');
 const path = require('path');
@@ -18,8 +19,10 @@ const geteilt = globalThis.__pepSprache ||= { asr: null, laden: null, fehler: nu
 module.exports = (app, ctx) => {
   const { HttpError, auth, wrap, audit, getSettings, express } = ctx;
   const ein = process.env.SPRACHE !== '0';
+  // bestes Modell, das der Arbeitsspeicher erlaubt (gemessen: small ~1,4 GB, large-v3-turbo ~3,3 GB während der Erkennung)
+  const gb = os.totalmem() / 1024 ** 3;
   const modell = process.env.SPRACHE_MODELL
-    || (os.totalmem() < 3 * 1024 ** 3 ? 'onnx-community/whisper-base' : 'onnx-community/whisper-small');
+    || (gb >= 7.5 ? 'onnx-community/whisper-large-v3-turbo' : gb >= 3 ? 'onnx-community/whisper-small' : 'onnx-community/whisper-base');
   const cacheDir = process.env.SPRACHE_CACHE || path.join(path.dirname(ctx.uploadDir), 'sprachmodelle');
 
   /** Erkenner: in Tests einsetzbar (opts.sprache), sonst Whisper */
