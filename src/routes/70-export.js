@@ -34,7 +34,8 @@ module.exports = (app, ctx) => {
     const users = Object.fromEntries(db.prepare('SELECT id, personalnummer FROM users').all().map((u) => [u.id, u.personalnummer || '']));
     const nr = nummern();
     const lines = [];
-    for (const x0 of r.rows) {
+    // Externe (Zeitarbeit/Leasing) werden über ihre Firma abgerechnet – nicht in der Lohn-Übergabe
+    for (const x0 of r.rows.filter((x) => x.beschaeftigung !== 'extern')) {
       // „gearbeitet“ enthält auch bewertete Bereitschaft und Ruf-Einsätze – die stehen als eigene Lohnarten darunter
       const r2 = (v) => Math.round(v * 100) / 100;
       const x = { ...x0, dienst_std: r2((Number(x0.gearbeitet) || 0) - (Number(x0.bereitschaft_std) || 0) - (Number(x0.ruf_einsatz_std) || 0)) };
@@ -46,7 +47,7 @@ module.exports = (app, ctx) => {
           bezeichnung: key === 'zulage' ? `${label} (${x.zulage})` : label, menge, einheit, betrag });
       }
     }
-    const fehlend = r.rows.filter((x) => !users[x.user_id]).map((x) => x.name);
+    const fehlend = r.rows.filter((x) => x.beschaeftigung !== 'extern' && !users[x.user_id]).map((x) => x.name);
     return { month, lines, fehlend, unterschiede: r.rows.filter((x) => !x.ist_erfasst && x.dienste).length,
       abgeschlossen: ctx.monatKomplett ? ctx.monatKomplett(month) : false };
   };

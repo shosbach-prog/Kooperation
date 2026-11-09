@@ -616,3 +616,29 @@ table.pp-table tr.pp-group th { position: static; }
 .sso-login { display: grid; gap: .6rem; margin: .8rem 0 .2rem; }
 a.sso-btn { display: flex; align-items: center; justify-content: center; gap: .5rem; min-height: 48px; border-radius: var(--radius-sm); background: var(--primary); color: var(--primary-ink); text-decoration: none; font-weight: 600; }
 a.sso-btn:hover { filter: brightness(1.08); }
+
+/* Beschäftigungsart: Flexpool / Extern */
+.btag { display: inline-block; font-size: .68rem; font-weight: 800; letter-spacing: .03em; line-height: 1; padding: .2rem .32rem; border-radius: 4px; margin-left: .3rem; vertical-align: middle; white-space: nowrap; }
+.btag.fp { background: #ede4fb; color: #5b2a9e; border: 1px solid #c9b2ef; }
+.btag.ext { background: #ffe9d6; color: #8a3d00; border: 1px solid #f2b98a; }
+.besetzung-art { margin-left: .35rem; }
+.besetzung-art .btag { margin-left: .15rem; }
+table.pp-table tr.pp-flexpool th.pp-name { box-shadow: inset 4px 0 0 #8e5bd6; }
+table.pp-table tr.pp-extern th.pp-name { box-shadow: inset 4px 0 0 #e07a1f; }
+table.pp-table tr.pp-group-flexpool th { color: #5b2a9e; }
+table.pp-table tr.pp-group-extern th { color: #8a3d00; }
+@media (prefers-color-scheme: dark) {
+  .btag.fp { background: #3a2a55; color: #d9c5ff; border-color: #6b4fa0; }
+  .btag.ext { background: #4a2c14; color: #ffd0a8; border-color: #9a5a28; }
+}
+.cell .person-btn > span:nth-child(2), .cell .person > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.cell .person-btn > .btag, .cell .person > .btag { flex: none; overflow: visible; margin-left: .2rem; }
+.cell .count .besetzung-art { white-space: nowrap; }
+
+.cell .is-ext, .cell .is-fp { border-radius: 4px; padding-left: 4px; }
+.cell .is-ext { box-shadow: inset 3px 0 0 #e07a1f; background: color-mix(in srgb, #e07a1f 10%, transparent); }
+.cell .is-fp { box-shadow: inset 3px 0 0 #8e5bd6; background: color-mix(in srgb, #8e5bd6 10%, transparent); }
+.cell .is-ext .avatar { outline: 2px solid #e07a1f; }
+.cell .is-fp .avatar { outline: 2px solid #8e5bd6; }
+.legend .l-fp::before { background: #8e5bd6; }
+.legend .l-ext::before { background: #e07a1f; }

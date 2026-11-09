@@ -814,3 +814,35 @@ test('Rückmeldung: senden, Verwaltung antwortet, Mitteilung an die Person', asy
   assert.equal((await c('GET', '/api/rueckmeldungen')).data[0].antwort, 'Danke, ist behoben.');
   assert.ok((await c('GET', '/api/notifications')).data.items.some((n) => n.titel === 'Antwort auf Ihre Rückmeldung'));
 });
+
+test('Flexpool und Externe: Kennzeichnung, Auswertung, Einsatznachweis, nicht in der Lohn-Übergabe', async () => {
+  const d = day(-4);
+  const month = d.slice(0, 7);
+  const s = await shiftOn(d, 'N', 'Station 2');
+  assert.equal((await mgr('POST', '/api/users', { username: 'x-ungueltig', name: 'X', password: 'demo12345', role: 'staff', beschaeftigung: 'leih' })).status, 400);
+  const fp = (await mgr('POST', '/api/users', { username: 'fp-person', name: 'Flex Pool', password: 'demo12345', role: 'staff', beschaeftigung: 'flexpool', personalnummer: '7001' })).data;
+  const ext = (await mgr('POST', '/api/users', { username: 'ext-person', name: 'Ex Tern', password: 'demo12345', role: 'staff', beschaeftigung: 'extern', firma: 'Pflege-Leasing GmbH' })).data;
+  assert.equal(fp.beschaeftigung, 'flexpool');
+  assert.equal(ext.firma, 'Pflege-Leasing GmbH');
+  await mgr('POST', `/api/shifts/${s.id}/assign`, { user_id: fp.id, force: true });
+  await mgr('POST', `/api/shifts/${s.id}/assign`, { user_id: ext.id, force: true });
+  // im Dienstplan gekennzeichnet
+  const plan = (await mgr('GET', `/api/plan?from=${d}&to=${d}`)).data.shifts.find((x) => x.id === s.id);
+  assert.equal(plan.assigned.find((a) => a.user_id === fp.id).beschaeftigung, 'flexpool');
+  const e = plan.assigned.find((a) => a.user_id === ext.id);
+  assert.equal(e.beschaeftigung, 'extern'); assert.equal(e.firma, 'Pflege-Leasing GmbH');
+  // Auswertung je Station und Firma
+  const arten = (await mgr('GET', `/api/report/einsatzarten?month=${month}`)).data;
+  const st = arten.stationen.find((x) => x.unit_id === s.unit_id);
+  assert.ok(st.flexpool >= 8 && st.extern >= 8, JSON.stringify(st));
+  assert.equal(arten.firmen.find((f) => f.firma === 'Pflege-Leasing GmbH').dienste, 1);
+  // Einsatznachweis Externe
+  const csv = (await mgr('GET', `/api/export/fremdpersonal.csv?month=${month}`)).data;
+  assert.match(csv, /"Pflege-Leasing GmbH";"Ex Tern";"[0-9.]+";"Station 2";"N Nachtdienst"/);
+  assert.doesNotMatch(csv, /Flex Pool/);
+  // Lohn-Übergabe: Flexpool ja, Externe nein
+  const lohn = (await mgr('GET', `/api/export/lohn?month=${month}`)).data;
+  assert.ok(lohn.lines.some((l) => l.personalnummer === '7001'));
+  assert.ok(!lohn.lines.some((l) => l.name === 'Ex Tern'));
+  assert.ok(!lohn.fehlend.includes('Ex Tern'));
+});

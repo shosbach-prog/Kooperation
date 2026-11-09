@@ -40,7 +40,8 @@ async function renderPlan() {
 
   const legend = h('div', { class: 'legend' },
     h('span', { class: 'l-bad' }, 'unter Mindestbesetzung'), h('span', { class: 'l-covered' }, 'im Verbund ausgeglichen'),
-    h('span', { class: 'l-ok' }, 'Mindestbesetzung erreicht'), h('span', { class: 'l-full' }, 'voll besetzt'));
+    h('span', { class: 'l-ok' }, 'Mindestbesetzung erreicht'), h('span', { class: 'l-full' }, 'voll besetzt'),
+    h('span', { class: 'l-fp' }, 'Flexpool'), h('span', { class: 'l-ext' }, 'extern'));
 
   const thead = h('tr', {}, h('th', {}, 'Dienst'), days.map((d) => {
     const wd = weekday(d); const hol = plan.holidays[d];
@@ -194,10 +195,10 @@ function renderCell(s, staffUsers, compact = false) {
   const list = h('ul', {}, s.assigned.map((a) => compact
     // Wochenraster: Name anklicken öffnet die Aktionen (spart Platz in schmalen Zellen)
     ? h('li', { class: a.user_id === state.me.id ? 'me' : '', title: `${a.name}${a.qualification ? ` – ${a.qualification}` : ''}` },
-      canAct(a) ? h('button', { class: 'person-btn', onclick: () => personActions(s, a) }, avatar(a, 20), h('span', {}, a.name), swapMark(a))
-        : h('span', { class: 'person' }, avatar(a, 20), h('span', {}, a.name), swapMark(a)))
+      canAct(a) ? h('button', { class: `person-btn${besch(a)}`, title: beschTitel(a), onclick: () => personActions(s, a) }, avatar(a, 20), h('span', {}, a.name), swapMark(a))
+        : h('span', { class: `person${besch(a)}`, title: beschTitel(a) }, avatar(a, 20), h('span', {}, a.name), swapMark(a)))
     : h('li', { class: a.user_id === state.me.id ? 'me' : '', title: a.qualification },
-    h('span', { class: 'person' }, avatar(a, 20), a.name, swapMark(a)),
+    h('span', { class: 'person' }, avatar(a, 20), a.name, beschTag(a), swapMark(a)),
     h('span', { class: 'li-actions' },
       a.user_id === state.me.id && isStaffRole() && !angebot(a)
         ? h('button', { class: 'tiny ghost', title: 'In der Tauschbörse anbieten', 'aria-label': 'Dienst in der Tauschbörse anbieten', onclick: async () => { if (await offerShift(s)) refresh(); } }, '⇆') : null,
@@ -206,7 +207,7 @@ function renderCell(s, staffUsers, compact = false) {
       canManageUnit(s.unit_id) ? h('button', { class: 'tiny danger', title: 'Austragen', 'aria-label': `${a.name} austragen`, onclick: () => unassign(s, a.user_id, a.name) }, '×') : null))));
 
   const count = h('div', { class: 'count' },
-    h('span', {}, `${n}/${s.max_staff ?? '∞'} · min ${s.min_staff}`),
+    h('span', {}, `${n}/${s.max_staff ?? '∞'} · min ${s.min_staff}`, besetzungsArt(s)),
     canManageUnit(s.unit_id) ? h('span', { class: 'li-actions' },
       s.unterbesetzt ? h('button', { class: 'tiny ghost', title: 'Rundruf: Personal benachrichtigen', 'aria-label': 'Rundruf senden', onclick: () => rundruf(s) }, '📣') : null,
       h('button', { class: 'tiny ghost', title: 'Besetzung/Notiz ändern', 'aria-label': 'Besetzung oder Notiz ändern', onclick: () => editShift(s) }, '✎')) : null);
@@ -220,7 +221,8 @@ function renderCell(s, staffUsers, compact = false) {
           const ab = absentIds.get(u.id);
           const w = wishOf(u.id, s.date);
           const wtxt = w ? (w.art === 'frei' ? ' · möchte frei' : w.shift_type_id === s.shift_type_id ? ' · ★ Wunschdienst' : ` · wünscht ${w.type_code}`) : '';
-          return h('option', { value: u.id, disabled: !!ab }, `${u.name}${u.qualification ? ' – ' + u.qualification : ''}${ab ? ` (${absLabel(ab)})` : ''}${wtxt}`);
+          const art = u.beschaeftigung === 'flexpool' ? ' [FP]' : u.beschaeftigung === 'extern' ? ` [EXT${u.firma ? ` ${u.firma}` : ''}]` : '';
+          return h('option', { value: u.id, disabled: !!ab }, `${u.name}${art}${u.qualification ? ' – ' + u.qualification : ''}${ab ? ` (${absLabel(ab)})` : ''}${wtxt}`);
         }))));
     }
   } else if (mine) {
@@ -354,13 +356,18 @@ async function moveShift(s, a, force = false) {
 function personGruppen(free, s) {
   const abwesend = new Set(absentOn(s.date).map((a) => a.user_id));
   const sortiert = [...free].sort((a, b) => abwesend.has(a.id) - abwesend.has(b.id) || a.name.localeCompare(b.name, 'de'));
-  const stamm = sortiert.filter((u) => u.stammbereich_id === s.unit_id);
-  const rest = sortiert.filter((u) => u.stammbereich_id !== s.unit_id);
+  const stammArt = (u) => (u.beschaeftigung || 'stamm') === 'stamm';
+  const stamm = sortiert.filter((u) => stammArt(u) && u.stammbereich_id === s.unit_id);
+  const rest = sortiert.filter((u) => stammArt(u) && u.stammbereich_id !== s.unit_id);
+  const flex = sortiert.filter((u) => u.beschaeftigung === 'flexpool');
+  const ext = sortiert.filter((u) => u.beschaeftigung === 'extern');
   const gruppen = [];
   if (stamm.length) gruppen.push([`Stammpersonal ${s.unit_name}`, stamm]);
   const byQ = new Map();
   for (const u of rest) { const q = u.qualification || 'ohne Qualifikation'; if (!byQ.has(q)) byQ.set(q, []); byQ.get(q).push(u); }
   for (const [q, us] of byQ) gruppen.push([stamm.length ? `Weitere: ${q}` : q, us]);
+  if (flex.length) gruppen.push(['Flexpool', flex]);
+  if (ext.length) gruppen.push(['Extern (Zeitarbeit/Leasing)', ext]);
   return gruppen;
 }
 
@@ -369,5 +376,18 @@ function gesperrteZelle(s) {
   const cls = s.unterbesetzt ? 'bad' : s.ausgeglichen ? 'covered' : 'ok';
   return h('div', { class: `cell ${cls} gesperrt`, title: 'Monat abgeschlossen – keine Änderungen möglich' },
     h('div', { class: 'count' }, h('span', {}, `${s.assigned.length} · min ${s.min_staff}`), h('span', { 'aria-label': 'abgeschlossen' }, '🔒')),
-    h('ul', {}, s.assigned.map((a) => h('li', { class: a.user_id === state.me.id ? 'me' : '' }, h('span', { class: 'person' }, avatar(a, 20), h('span', {}, a.name))))));
+    h('ul', {}, s.assigned.map((a) => h('li', { class: a.user_id === state.me.id ? 'me' : '' }, h('span', { class: 'person' }, avatar(a, 20), h('span', {}, a.name), beschTag(a))))));
 }
+
+/** Zusatz in der Besetzungszeile: wie viele davon Flexpool / extern */
+function besetzungsArt(s) {
+  const fp = s.assigned.filter((a) => a.beschaeftigung === 'flexpool').length;
+  const ext = s.assigned.filter((a) => a.beschaeftigung === 'extern').length;
+  if (!fp && !ext) return null;
+  return h('span', { class: 'besetzung-art' }, fp ? h('span', { class: 'btag fp', title: `${fp} vom Flexpool` }, `${fp} FP`) : null,
+    ext ? h('span', { class: 'btag ext', title: `${ext} extern` }, `${ext} EXT`) : null);
+}
+
+/** Im engen Wochenraster: farbiger Rand statt Textkürzel */
+const besch = (a) => (a.beschaeftigung === 'flexpool' ? ' is-fp' : a.beschaeftigung === 'extern' ? ' is-ext' : '');
+const beschTitel = (a) => `${a.name}${a.beschaeftigung === 'flexpool' ? ' – Flexpool' : a.beschaeftigung === 'extern' ? ` – extern${a.firma ? ` (${a.firma})` : ''}` : ''}${a.qualification ? ` – ${a.qualification}` : ''}`;

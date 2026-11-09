@@ -155,7 +155,7 @@ test('Ablauf: Plan erzeugen, eintragen, Regeln, Auswertung', async () => {
   assert.ok(r.data.rows[0].nacht > 7);
 
   r = await mgr('GET', `/api/report?month=${month}`);
-  assert.equal(r.data.rows.length, 6);
+  assert.equal(r.data.rows.length, 8); // 6 Stammkräfte + Flexpool + extern
   assert.ok(r.data.understaffed.length > 0);
 
   r = await mgr('GET', `/api/report.csv?month=${month}`);

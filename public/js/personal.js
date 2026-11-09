@@ -28,18 +28,20 @@ async function renderStaff() {
   const [users, units] = await Promise.all([api('GET', 'api/users'), api('GET', 'api/units')]);
   const unitById = new Map(units.map((u) => [u.id, u]));
   const unitName = new Map(units.map((u) => [u.id, u.building_name ? `${u.name} · ${u.building_name}` : u.name]));
-  state.personalFilter = state.personalFilter || { q: '', unit: '', qual: '', status: 'aktiv' };
+  state.personalFilter = state.personalFilter || { q: '', unit: '', qual: '', status: 'aktiv', besch: '' };
   const f = state.personalFilter;
   const search = h('input', { type: 'search', placeholder: 'Name, Personalnr., Benutzer …', value: f.q });
   const unitSel = unitFilterSelect(units, f.unit, () => draw(), 'alle Bereiche');
   const qualSel = h('select', {}, h('option', { value: '' }, 'alle Qualifikationen'),
     (state.settings.qualifikationen || []).map((q) => h('option', { value: q, selected: q === f.qual }, q)));
+  const beschSel = h('select', { 'aria-label': 'Beschäftigungsart' }, [['', 'alle Beschäftigungsarten'], ['stamm', 'Stammpersonal'], ['flexpool', 'Flexpool'], ['extern', 'Extern']]
+    .map(([v, l]) => h('option', { value: v, selected: v === (f.besch || '') }, l)));
   const statusSel = h('select', {}, [['aktiv', 'aktive'], ['inaktiv', 'inaktive / ausgeschiedene'], ['verwaltung', 'mit Verwaltungsrechten'], ['', 'alle']]
     .map(([v, l]) => h('option', { value: v, selected: v === f.status }, l)));
   const tbody = h('tbody');
   const count = h('span', { class: 'muted small' });
   const draw = () => {
-    Object.assign(f, { q: search.value.trim().toLowerCase(), unit: unitSel.value, qual: qualSel.value, status: statusSel.value });
+    Object.assign(f, { q: search.value.trim().toLowerCase(), unit: unitSel.value, qual: qualSel.value, status: statusSel.value, besch: beschSel.value });
     const today = todayIso();
     const list = users.filter((u) => {
       const ausgeschieden = !u.active || (u.austritt && u.austritt < today);
@@ -52,13 +54,14 @@ async function renderStaff() {
           : String(u.stammbereich_id) !== f.unit.replace(/^u:/, '')) return false;
       }
       if (f.qual && u.qualification !== f.qual) return false;
-      if (f.q && ![u.name, u.username, u.personalnummer, u.email].some((x) => String(x || '').toLowerCase().includes(f.q))) return false;
+      if (f.besch && (u.beschaeftigung || 'stamm') !== f.besch) return false;
+      if (f.q && ![u.name, u.username, u.personalnummer, u.email, u.firma].some((x) => String(x || '').toLowerCase().includes(f.q))) return false;
       return true;
     });
     count.textContent = `${list.length} von ${users.length} Personen`;
     tbody.replaceChildren(...list.map((u) => h('tr', { class: `clickable${u.active ? '' : ' inactive'}`, onclick: () => renderPersonalakte(u.id) },
       h('td', {}, u.personalnummer || '–'),
-      h('td', {}, h('div', { class: 'person' }, avatar(u, 32), h('div', {}, h('strong', {}, u.name), h('div', { class: 'small muted' }, u.username)))),
+      h('td', {}, h('div', { class: 'person' }, avatar(u, 32), h('div', {}, h('strong', {}, u.name, ' ', beschTag(u)), h('div', { class: 'small muted' }, u.username, u.beschaeftigung === 'extern' && u.firma ? ` · ${u.firma}` : '')))),
       h('td', {}, u.qualification || '–'),
       h('td', {}, unitName.get(u.stammbereich_id) || '–'),
       h('td', { class: 'num' }, fmtNum(u.weekly_hours)),
@@ -68,14 +71,14 @@ async function renderStaff() {
         u.totp_enabled ? null : h('span', { class: 'badge warn' }, '2FA offen'))))));
     stackTables(card);
   };
-  for (const el of [qualSel, statusSel]) el.addEventListener('change', draw);
+  for (const el of [qualSel, statusSel, beschSel]) el.addEventListener('change', draw);
   search.addEventListener('input', draw);
   const card = h('div', { class: 'card' },
     h('div', { class: 'toolbar' }, h('h2', { style: { margin: 0 } }, 'Personal'), h('span', { class: 'spacer' }),
       h('a', { href: 'api/users.csv' }, h('button', { class: 'ghost' }, 'Personalliste (Excel)')),
       h('button', { onclick: () => renderPersonalakte(null) }, '+ Neue Person')),
     h('div', { class: 'row filters' }, h('label', {}, 'Suche', search), h('label', {}, 'Bereich', unitSel),
-      h('label', {}, 'Qualifikation', qualSel), h('label', {}, 'Anzeigen', statusSel)),
+      h('label', {}, 'Qualifikation', qualSel), h('label', {}, 'Beschäftigung', beschSel), h('label', {}, 'Anzeigen', statusSel)),
     count,
     h('div', { class: 'table-wrap' }, h('table', {},
       h('thead', {}, h('tr', {}, ['Pers.-Nr.', 'Name', 'Qualifikation', 'Stammbereich', 'Wochenstd.', 'Eintritt', 'Hinweise'].map((x) => h('th', {}, x)))),
@@ -113,7 +116,7 @@ async function renderPersonalakte(id) {
     h('div', { class: 'akte-main' }, h('h2', { style: { margin: 0 } }, u.name),
       h('div', { class: 'muted' }, [u.qualification, units.find((x) => x.id === u.stammbereich_id)?.name, u.personalnummer && `Pers.-Nr. ${u.personalnummer}`]
         .filter(Boolean).join(' · ') || '–'),
-      h('div', { class: 'badges' }, rechteBadge(u), vertragHinweis(u), !u.active ? h('span', { class: 'badge bad' }, 'inaktiv') : null,
+      h('div', { class: 'badges' }, beschTag(u, true), rechteBadge(u), vertragHinweis(u), !u.active ? h('span', { class: 'badge bad' }, 'inaktiv') : null,
         u.totp_enabled ? h('span', { class: 'badge ok' }, '2FA eingerichtet') : h('span', { class: 'badge warn' }, '2FA noch nicht eingerichtet'),
         u.locked ? h('span', { class: 'badge bad' }, 'gesperrt') : null)),
     h('div', { class: 'akte-contact' },
@@ -231,6 +234,13 @@ function staffForm(u, units) {
       f('email', 'E-Mail (dienstlich)', { type: 'email', value: u?.email || '' }),
       f('telefon', 'Telefon', { type: 'tel', value: u?.telefon || '' })),
     section('Einsatz',
+      h('label', {}, 'Beschäftigungsart', (() => {
+        const sel = h('select', { name: 'beschaeftigung' }, Object.entries(BESCH_LABEL).map(([v, l]) => h('option', { value: v, selected: (u?.beschaeftigung || 'stamm') === v }, l)));
+        sel.addEventListener('change', () => { const fl = form.querySelector('.firma-feld'); if (fl) fl.hidden = sel.value !== 'extern'; });
+        return sel;
+      })()),
+      h('label', { class: 'firma-feld', hidden: (u?.beschaeftigung || 'stamm') !== 'extern' }, 'Firma (Zeitarbeit/Leasing)',
+        h('input', { name: 'firma', value: u?.firma || '', maxlength: 80, placeholder: 'z. B. Name des Personaldienstleisters' })),
       h('label', {}, 'Qualifikation', h('select', { name: 'qualification' }, h('option', { value: '' }, '– keine –'),
         [...new Set([...(state.settings.qualifikationen || []), ...(u?.qualification ? [u.qualification] : [])])]
           .map((q) => h('option', { value: q, selected: u?.qualification === q }, q)))),

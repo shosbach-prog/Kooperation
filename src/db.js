@@ -413,6 +413,11 @@ function seed(db, withDemo) {
   for (const [name, user, qual, wh, minH] of demo) {
     insUser.run(name, user, hashPassword('demo123'), 'staff', qual, wh, minH, 22.5);
   }
+  // Demo: Flexpool und externe Kraft (Zeitarbeit), springen stationsübergreifend ein
+  const fp = insUser.run('Pia Flexner', 'pflexner', hashPassword('demo123'), 'staff', 'Pflegefachkraft', 38.5, 0, 22.5).lastInsertRowid;
+  const ex = insUser.run('Marek Nowicki', 'mnowicki', hashPassword('demo123'), 'staff', 'Pflegefachkraft', 38.5, 0, 0).lastInsertRowid;
+  db.prepare("UPDATE users SET beschaeftigung = 'flexpool' WHERE id = ?").run(fp);
+  db.prepare("UPDATE users SET beschaeftigung = 'extern', firma = 'Muster Personalservice GmbH' WHERE id = ?").run(ex);
 }
 
 /** Ergänzt fehlende Spalten in älteren Datenbanken */
@@ -452,6 +457,9 @@ function migrate(db) {
   add('assignments', 'ist_by INTEGER');
   add('assignments', 'ist_at TEXT');
   add('assignments', 'einsatz_std REAL');
+  // Beschäftigungsart: stamm = Stammpersonal, flexpool = LWL-Flexpool (springt stationsübergreifend ein), extern = Zeitarbeit/Leasing
+  add('users', "beschaeftigung TEXT NOT NULL DEFAULT 'stamm'");
+  add('users', "firma TEXT NOT NULL DEFAULT ''");
   add('stempel', 'offline INTEGER NOT NULL DEFAULT 0');
   db.exec('CREATE TABLE IF NOT EXISTS stempel_offline_ids (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, at TEXT NOT NULL DEFAULT (datetime(\'now\')))');
   add('assignments', 'ist_raucher_min INTEGER');

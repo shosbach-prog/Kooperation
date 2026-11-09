@@ -129,3 +129,12 @@ function fitTables(root = main()) {
 }
 let fitTimer;
 window.addEventListener('resize', () => { clearTimeout(fitTimer); fitTimer = setTimeout(() => fitTables(), 150); });
+
+/** Kennzeichnung der Beschäftigungsart: Flexpool (FP) und externe Kräfte (EXT, mit Firma) */
+const BESCH_LABEL = { stamm: 'Stammpersonal', flexpool: 'Flexpool', extern: 'Extern (Zeitarbeit/Leasing)' };
+function beschTag(u, lang = false) {
+  const b = u?.beschaeftigung;
+  if (b === 'flexpool') return h('span', { class: 'btag fp', title: 'Flexpool' }, lang ? 'Flexpool' : 'FP');
+  if (b === 'extern') return h('span', { class: 'btag ext', title: `Extern${u.firma ? ` – ${u.firma}` : ''}` }, lang ? `Extern${u.firma ? ` · ${u.firma}` : ''}` : 'EXT');
+  return null;
+}

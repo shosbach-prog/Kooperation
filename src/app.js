@@ -177,7 +177,7 @@ function createApp(db, opts = {}) {
     urlaubstage_jahr: u.urlaubstage_jahr, schwerbehindert: !!u.schwerbehindert, zusatzurlaub_tage: u.zusatzurlaub_tage,
     personalnummer: u.personalnummer, email: u.email, telefon: u.telefon, eintritt: u.eintritt, austritt: u.austritt,
     befristet_bis: u.befristet_bis, entgeltgruppe: u.entgeltgruppe, stufe: u.stufe, stammbereich_id: u.stammbereich_id,
-    bemerkung: u.bemerkung, foto_version: u.foto_version || 0, admin_rechte: u.admin_rechte || 'keine', admin_bis: u.admin_bis,
+    bemerkung: u.bemerkung, foto_version: u.foto_version || 0, beschaeftigung: u.beschaeftigung || 'stamm', firma: u.firma || '', admin_rechte: u.admin_rechte || 'keine', admin_bis: u.admin_bis,
     is_manager: hasMgr(u), is_haupt: isHaupt(u), admin_units: scopeOf(u) ? [...scopeOf(u)] : [],
     totp_enabled: !!u.totp_enabled, locked: u.locked_until > Date.now(), recovery_left: JSON.parse(u.recovery_codes || '[]').length,
   });
@@ -364,6 +364,11 @@ function createApp(db, opts = {}) {
     if ('role' in b || !partial) { out.role = b.role === 'manager' ? 'manager' : 'staff'; }
     for (const k of ['qualification', 'personalnummer', 'telefon', 'entgeltgruppe']) if (k in b) out[k] = String(b[k] ?? '').trim().slice(0, 60);
     if ('bemerkung' in b) out.bemerkung = String(b.bemerkung ?? '').trim().slice(0, 2000);
+    if ('beschaeftigung' in b) {
+      if (!['stamm', 'flexpool', 'extern'].includes(b.beschaeftigung)) throw new HttpError(400, 'Beschäftigungsart: Stammpersonal, Flexpool oder Extern.');
+      out.beschaeftigung = b.beschaeftigung;
+    }
+    if ('firma' in b) out.firma = String(b.firma ?? '').trim().slice(0, 80);
     if ('email' in b) {
       const e = String(b.email ?? '').trim();
       if (e && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) throw new HttpError(400, 'E-Mail-Adresse ungültig.');
@@ -894,9 +899,12 @@ function createApp(db, opts = {}) {
   const assignedFor = (ids) => {
     const byShift = new Map(ids.map((id) => [id, []]));
     if (!ids.length) return byShift;
-    const rows = db.prepare(`SELECT a.shift_id, us.id AS user_id, us.name, us.qualification, us.foto_version FROM assignments a
+    const rows = db.prepare(`SELECT a.shift_id, us.id AS user_id, us.name, us.qualification, us.foto_version, us.beschaeftigung, us.firma FROM assignments a
       JOIN users us ON us.id = a.user_id WHERE a.shift_id IN (${ids.map(() => '?').join(',')}) ORDER BY us.name`).all(...ids);
-    for (const a of rows) byShift.get(a.shift_id).push({ user_id: a.user_id, name: a.name, qualification: a.qualification, foto_version: a.foto_version });
+    for (const a of rows) {
+      byShift.get(a.shift_id).push({ user_id: a.user_id, name: a.name, qualification: a.qualification, foto_version: a.foto_version,
+        beschaeftigung: a.beschaeftigung || 'stamm', firma: a.firma || '' });
+    }
     return byShift;
   };
 
@@ -1629,6 +1637,7 @@ function createApp(db, opts = {}) {
       return {
         zulage, zulage_eur: zulageEur,
         user_id: u.id, name: u.name, qualification: u.qualification, weekly_hours: u.weekly_hours, stammbereich_id: u.stammbereich_id,
+        beschaeftigung: u.beschaeftigung || 'stamm', firma: u.firma || '',
         min_hours_month: u.min_hours_month, dienste: shifts.length, nachtschichten,
         gearbeitet: r2(sum.stunden), urlaub_tage: urlaubTage, urlaub_std: r2(urlaubStd), krank_tage: krankTage, krank_std: r2(krankStd),
         sonder_tage: sonderTage, sonder_std: r2(sonderStd), fortbildung_tage: fortbildungTage, fortbildung_std: r2(fortbildungStd),

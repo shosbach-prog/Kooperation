@@ -60,11 +60,11 @@ async function renderPersonenplan() {
   // Personen: Stammpersonal der gewählten Bereiche + alle, die dort eingeteilt sind
   const people = new Map();
   for (const u of users.filter((x) => x.active && x.role === 'staff' && (!f || unitOk(x.stammbereich_id)))) {
-    people.set(u.id, { id: u.id, name: u.name, qualification: u.qualification, foto_version: u.foto_version, stamm: u.stammbereich_id, std: 0, cells: {} });
+    people.set(u.id, { id: u.id, name: u.name, qualification: u.qualification, foto_version: u.foto_version, stamm: u.stammbereich_id, beschaeftigung: u.beschaeftigung, firma: u.firma, std: 0, cells: {} });
   }
   for (const s of shifts) {
     for (const a of s.assigned) {
-      if (!people.has(a.user_id)) people.set(a.user_id, { id: a.user_id, name: a.name, qualification: a.qualification, foto_version: a.foto_version, stamm: null, std: 0, cells: {} });
+      if (!people.has(a.user_id)) people.set(a.user_id, { id: a.user_id, name: a.name, qualification: a.qualification, foto_version: a.foto_version, stamm: null, beschaeftigung: a.beschaeftigung, firma: a.firma, std: 0, cells: {} });
       const p = people.get(a.user_id);
       (p.cells[s.date] ||= []).push(s);
       p.std += s.hours || 0;
@@ -76,10 +76,15 @@ async function renderPersonenplan() {
   const suche = (state.ppSuche || '').toLowerCase();
   const qual = state.ppQual || '';
   const nurDienst = !!state.ppNurDienst;
+  const besch = state.ppBesch || '';
   let list = [...people.values()].filter((p) => (!suche || p.name.toLowerCase().includes(suche))
-    && (!qual || p.qualification === qual) && (!nurDienst || Object.keys(p.cells).length));
+    && (!qual || p.qualification === qual) && (!nurDienst || Object.keys(p.cells).length) && (!besch || (p.beschaeftigung || 'stamm') === besch));
   const qOrder = state.settings.qualifikationen || [];
+  const artRang = { stamm: 0, flexpool: 1, extern: 2 };
+  // Gruppen: Stammpersonal nach Qualifikation, dann Flexpool, dann Externe
+  const gruppe = (p) => (p.beschaeftigung === 'flexpool' ? 'Flexpool' : p.beschaeftigung === 'extern' ? 'Extern (Zeitarbeit/Leasing)' : p.qualification || 'ohne Qualifikation');
   list.sort((a, b) => (b.id === state.me.id) - (a.id === state.me.id)
+    || (artRang[a.beschaeftigung || 'stamm'] - artRang[b.beschaeftigung || 'stamm'])
     || (qOrder.indexOf(a.qualification) + 1 || 99) - (qOrder.indexOf(b.qualification) + 1 || 99) || a.name.localeCompare(b.name, 'de'));
 
   const absMap = new Map();
@@ -127,12 +132,12 @@ async function renderPersonenplan() {
   let lastQ = null;
   const body = [];
   for (const p of list) {
-    if (p.id !== state.me.id && p.qualification !== lastQ && !suche) {
-      lastQ = p.qualification;
-      body.push(h('tr', { class: 'pp-group' }, h('th', { colspan: days.length + 2, scope: 'colgroup' }, h('span', { class: 'pp-group-label' }, p.qualification || 'ohne Qualifikation'))));
+    if (p.id !== state.me.id && gruppe(p) !== lastQ && !suche) {
+      lastQ = gruppe(p);
+      body.push(h('tr', { class: `pp-group${p.beschaeftigung && p.beschaeftigung !== 'stamm' ? ` pp-group-${p.beschaeftigung}` : ''}` }, h('th', { colspan: days.length + 2, scope: 'colgroup' }, h('span', { class: 'pp-group-label' }, lastQ))));
     }
-    body.push(h('tr', { class: p.id === state.me.id ? 'pp-me' : '' },
-      h('th', { scope: 'row', class: 'pp-name' }, avatar(p, 22), h('span', {}, p.name)),
+    body.push(h('tr', { class: `${p.id === state.me.id ? 'pp-me' : ''}${p.beschaeftigung && p.beschaeftigung !== 'stamm' ? ` pp-${p.beschaeftigung}` : ''}` },
+      h('th', { scope: 'row', class: 'pp-name', title: p.beschaeftigung === 'extern' && p.firma ? `Extern – ${p.firma}` : '' }, avatar(p, 22), h('span', {}, p.name), beschTag(p)),
       days.map((d) => cell(p, d)),
       h('td', { class: 'num pp-std' }, fmtNum(p.std, 1))));
   }
@@ -148,7 +153,7 @@ async function renderPersonenplan() {
     if (zeitraum === 'monat') { const [y, m] = state.planMonat.split('-').map(Number); state.planMonat = toIso(Date.UTC(y, m - 1 + n, 1)).slice(0, 7); } else state.weekStart = addDays(state.weekStart, 7 * n);
     renderPersonenplan();
   };
-  const aktiveFilter = [f, qual, suche, nurDienst].filter(Boolean).length;
+  const aktiveFilter = [f, qual, suche, nurDienst, besch].filter(Boolean).length;
   const toolbar = h('div', { class: 'toolbar pp-toolbar' },
     planModusSchalter(),
     h('div', { class: 'pp-nav' },
@@ -161,6 +166,8 @@ async function renderPersonenplan() {
     h('summary', {}, 'Filter', aktiveFilter ? h('span', { class: 'badge' }, `${aktiveFilter} aktiv`) : null),
     h('div', { class: 'toolbar' },
     unitSelect,
+    h('select', { 'aria-label': 'Beschäftigungsart', onchange: (e) => { state.ppBesch = e.target.value; renderPersonenplan(); } },
+      [['', 'alle Beschäftigungsarten'], ['stamm', 'Stammpersonal'], ['flexpool', 'Flexpool'], ['extern', 'Extern']].map(([v, l]) => h('option', { value: v, selected: v === besch }, l))),
     h('select', { 'aria-label': 'Qualifikation', onchange: (e) => { state.ppQual = e.target.value; renderPersonenplan(); } },
       h('option', { value: '' }, 'alle Qualifikationen'), quals.map((q) => h('option', { value: q, selected: q === qual }, q))),
     sucheInput,
@@ -168,7 +175,7 @@ async function renderPersonenplan() {
   filterBox.addEventListener('toggle', () => { state.ppFilterOffen = filterBox.open; });
   const legend = h('div', { class: 'legend pp-legend' },
     h('span', {}, h('span', { class: 'pp-abs' }, 'U'), ' Urlaub'), isMgr() ? h('span', {}, h('span', { class: 'pp-abs' }, 'K'), ' krank') : h('span', {}, h('span', { class: 'pp-abs' }, 'A'), ' abwesend'),
-    h('span', {}, '↗ andere Station'), isMgr() ? h('span', {}, '♡ möchte frei · ★ Wunschdienst') : null,
+    h('span', {}, '↗ andere Station'), h('span', {}, h('span', { class: 'btag fp' }, 'FP'), ' Flexpool'), h('span', {}, h('span', { class: 'btag ext' }, 'EXT'), ' extern'), isMgr() ? h('span', {}, '♡ möchte frei · ★ Wunschdienst') : null,
     h('span', {}, h('span', { class: 'pp-ok' }, '✓'), ' besetzt'), h('span', {}, h('span', { class: 'pp-bad' }, '−1'), ' fehlt'),
     h('span', { class: 'muted' }, 'Feld antippen zum Ein-/Austragen'));
 

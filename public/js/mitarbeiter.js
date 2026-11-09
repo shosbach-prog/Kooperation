@@ -62,7 +62,7 @@ function zuschlagTable(rows, withName) {
     h('table', { class: withName ? 'sticky-first' : '' },
       h('thead', {}, h('tr', {}, cols.map(([, l, n]) => h('th', { class: n ? 'num' : '' }, l)), withName ? h('th', {}, 'Mindestverf.') : null)),
       h('tbody', {}, rows.map((r) => h('tr', {},
-        cols.map(([k, , n, d]) => h('td', { class: n ? 'num' : '' }, n ? fmtNum(r[k], d ?? 2) : r[k])),
+        cols.map(([k, , n, d]) => h('td', { class: n ? 'num' : '' }, n ? fmtNum(r[k], d ?? 2) : r[k], k === 'name' ? [' ', beschTag(r)] : null)),
         withName ? h('td', {}, r.min_erfuellt ? h('span', { class: 'badge ok' }, 'erfüllt') : h('span', { class: 'badge bad' }, 'nicht erfüllt'),
           r.au_fehlt ? h('div', {}, h('span', { class: 'badge warn' }, `AU fehlt (${r.au_fehlt})`)) : null) : null)))),
     h('p', { class: 'small muted' }, 'Stundenangaben in Std. (bezahlte Zeit nach Abzug der Pause). Urlaub und Krankheit werden je Arbeitstag mit 1/5 der Wochenarbeitszeit angerechnet. ',
@@ -72,10 +72,11 @@ function zuschlagTable(rows, withName) {
 
 // ---------- Auswertung (Manager) ----------
 async function renderReport() {
-  const [r, exp, units, abschluss] = await Promise.all([api('GET', `api/report?month=${state.month}`), exportCard(), api('GET', 'api/units'), abschlussCard()]);
+  const [r, exp, units, abschluss, arten] = await Promise.all([api('GET', `api/report?month=${state.month}`), exportCard(), api('GET', 'api/units'), abschlussCard(),
+    api('GET', `api/report/einsatzarten?month=${state.month}`).catch(() => null)]);
   const lf = listenFilter('report', units, renderReport);
   const rows = r.rows.filter((x) => lf.passt(x.name, x.stammbereich_id));
-  setMain(abschluss, exp, h('div', { class: 'card' },
+  setMain(abschluss, exp, einsatzartenCard(arten), h('div', { class: 'card' },
     h('div', { class: 'toolbar' },
       h('label', {}, 'Monat', h('input', { type: 'month', value: state.month, onchange: (e) => { state.month = e.target.value; renderReport(); } })),
       ...lf.leiste,
@@ -169,4 +170,26 @@ function showVorschlag(target, r) {
       } catch (e) { toast(e.message, true); }
     } }, 'Ausgewählte übernehmen')) : null);
   stackTables(target);
+}
+
+/** Auswertung: Einsatz von Flexpool und externem Personal je Station */
+function einsatzartenCard(d) {
+  if (!d || !d.stationen.some((x) => x.flexpool || x.extern)) return null;
+  const pct = (x, t) => (t ? `${Math.round((x / t) * 100)} %` : '–');
+  return h('div', { class: 'card' }, h('h2', {}, 'Einsatz von Flexpool und externem Personal'),
+    h('div', { class: 'table-wrap' }, h('table', {},
+      h('thead', {}, h('tr', {}, ['Station', 'Stunden gesamt', 'Stammpersonal', 'Flexpool', 'Extern', 'Anteil Flexpool', 'Anteil extern'].map((x, i) => h('th', { class: i ? 'num' : '' }, x)))),
+      h('tbody', {}, d.stationen.map((x) => {
+        const t = x.stamm + x.flexpool + x.extern;
+        return h('tr', {}, h('td', {}, x.unit_name), h('td', { class: 'num' }, fmtNum(t, 1)), h('td', { class: 'num' }, fmtNum(x.stamm, 1)),
+          h('td', { class: 'num' }, fmtNum(x.flexpool, 1), x.dienste_flexpool ? h('div', { class: 'small muted' }, `${x.dienste_flexpool} Dienste`) : null),
+          h('td', { class: 'num' }, fmtNum(x.extern, 1), x.dienste_extern ? h('div', { class: 'small muted' }, `${x.dienste_extern} Dienste`) : null),
+          h('td', { class: 'num' }, pct(x.flexpool, t)), h('td', { class: 'num' }, pct(x.extern, t)));
+      })))),
+    d.firmen.length ? [h('h3', {}, 'Externe nach Firma'), h('div', { class: 'table-wrap' }, h('table', {},
+      h('thead', {}, h('tr', {}, ['Firma', 'Personen', 'Dienste', 'Stunden'].map((x, i) => h('th', { class: i ? 'num' : '' }, x)))),
+      h('tbody', {}, d.firmen.map((f) => h('tr', {}, h('td', {}, f.firma), h('td', { class: 'num' }, f.personen), h('td', { class: 'num' }, f.dienste), h('td', { class: 'num' }, fmtNum(f.std, 2)))))))] : null,
+    h('div', { class: 'toolbar' }, h('a', { href: `api/export/fremdpersonal.csv?month=${state.month}` }, h('button', { class: 'ghost' }, 'Einsatznachweis Externe (CSV)'))),
+    h('p', { class: 'small muted' }, 'Grundlage: Ist-Zeiten (Stempeluhr/erfasst), sonst Planzeiten. Der Einsatznachweis dient der Prüfung der Rechnungen der Personaldienstleister; ',
+      'externe Kräfte sind nicht in der Lohn-Übergabe enthalten.'));
 }

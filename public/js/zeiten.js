@@ -48,7 +48,7 @@ function zeitenTable(list, { withName, rerender }) {
   return h('div', { class: 'table-wrap' }, h('table', {},
     h('thead', {}, h('tr', {}, [...(withName ? ['Name'] : []), 'Datum', 'Dienst', 'Plan', 'Ist', 'Differenz', ''].map((x) => h('th', {}, x)))),
     h('tbody', {}, list.map((z) => h('tr', {},
-      withName ? h('td', {}, z.name) : null,
+      withName ? h('td', {}, z.name, ' ', beschTag(z)) : null,
       h('td', {}, `${WD[weekday(z.date)]} ${fmtDate(z.date)}`),
       h('td', {}, h('span', { class: 'chip', style: { background: z.type_color } }, z.type_code), z.type_name, z.art !== 'dienst' ? h('div', { class: 'small muted' }, ART_LABEL[z.art]) : null,
         h('div', { class: 'small muted' }, z.unit_name)),

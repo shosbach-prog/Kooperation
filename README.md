@@ -86,6 +86,7 @@ Arbeitszeit wird angelehnt an den **TVöD (BT-K)** angerechnet.
 - **Personenansicht im Dienstplan:** Zeilen = Personen, Spalten = Tage (Woche/Monat), mit Filtern und Besetzungszeile – übersichtlich auch bei 50+ Mitarbeitenden
 - **Stempeluhr** fürs Handy mit Pausen und Raucherpausen, gesetzlicher Mindestpause und **Stempeln ohne Netz**
 - **Qualifikation vertritt** (z. B. Fachkraft zählt als Hilfskraft), **Monatsabschluss** je Station mit Sperre, **Rückmeldung** aus der App, **Beispieldaten entfernen**
+- **Flexpool und externes Personal:** Beschäftigungsart je Person (Stamm / Flexpool / Extern mit Firma), farbig gekennzeichnet im Dienstplan, in der Personenansicht, Personalliste und Zeiterfassung; Auswertung der Einsatzstunden je Station und Firma, Einsatznachweis für die Rechnungsprüfung (CSV); Externe nicht in der Lohn-Übergabe
 - **Single Sign-on** über das Klinik-Konto (OpenID Connect, z. B. Microsoft Entra ID) – siehe [deploy/SSO.md](deploy/SSO.md)
 - **Passkeys:** Anmeldung per Fingerabdruck, Gesichtserkennung oder Geräte-PIN (WebAuthn) – ohne Passwort und Code; Einrichtung unter „Mein Profil“, bei Handyverlust entfernt „2FA zurücksetzen“ auch die Passkeys
 - **Barrierefreiheit:** geprüft mit axe-core nach WCAG 2.1 AA (Kontraste, Beschriftungen, Tastatur, Sprunglink, dunkler Modus)
