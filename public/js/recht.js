@@ -36,7 +36,8 @@ function datenCard() {
     h('div', { class: 'toolbar' },
       h('a', { href: 'api/me/export', download: '' }, h('button', { class: 'ghost', type: 'button' }, 'Meine Daten herunterladen')),
       h('button', { class: 'ghost', type: 'button', onclick: () => showLegal('datenschutz') }, 'Datenschutzhinweise'),
-      h('button', { class: 'ghost', type: 'button', onclick: () => showLegal('impressum') }, 'Impressum')));
+      h('button', { class: 'ghost', type: 'button', onclick: () => showLegal('impressum') }, 'Impressum')),
+    androidAppHinweis());
 }
 
 /** Karte „Löschlauf“ in den Einstellungen */
@@ -66,4 +67,18 @@ async function beispieldatenCard() {
       try { const r = await api('POST', 'api/admin/beispieldaten/entfernen', { ids: d.personen.map((p) => p.id) }); toast(`${r.entfernt} Beispielpersonen entfernt.`); renderSettings(); } catch (e) { toast(e.message, true); }
     } }, 'Beispielpersonen entfernen'),
     h('p', { class: 'small muted' }, 'Beispiel-Stationen und -Dienstzeiten können Sie unter „Campus & Stationen“ bzw. „Dienstzeiten“ umbenennen oder deaktivieren.'));
+}
+
+// ---------- Android-App ----------
+const inAndroidApp = (() => {
+  try {
+    if (document.referrer.startsWith('android-app://')) sessionStorage.setItem('pep.inApp', '1');
+    return sessionStorage.getItem('pep.inApp') === '1';
+  } catch { return false; }
+})();
+/** Hinweis „Android-App herunterladen“ – nur auf Android-Geräten im Browser, nicht in der App selbst */
+function androidAppHinweis() {
+  if (inAndroidApp || !/Android/i.test(navigator.userAgent)) return null;
+  return h('p', { class: 'small android-app' }, h('a', { href: 'dienstplan.apk', download: 'Dienstplan.apk' }, '📱 Android-App herunterladen'),
+    h('span', { class: 'muted' }, ' – Installation: Datei öffnen und „Installieren“ tippen (ggf. „Unbekannte Apps installieren“ für den Browser erlauben).'));
 }

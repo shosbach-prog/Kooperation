@@ -53,7 +53,7 @@ function renderLogin() {
   if (ssoFehler) { document.getElementById('login-error').textContent = ssoFehler; history.replaceState(null, '', location.pathname); }
   const pk = passkeyLoginButton();
   if (pk) main().querySelector('#login-form').after(pk);
-  main().querySelector('.login').append(legalLinks());
+  main().querySelector('.login').append(...[androidAppHinweis(), legalLinks()].filter(Boolean));
   if (state.branding?.demo) demoLogin(main().querySelector('.login'));
   else if (state.branding?.demo_link) demoTeaser(main().querySelector('.login'));
   const form = document.getElementById('login-form');

@@ -1,6 +1,6 @@
 /* Service Worker: speichert nur die Programmdateien (App-Hülle), damit die App schnell startet.
    Dienstplan- und Personaldaten (/api/...) werden NIE zwischengespeichert. */
-const CACHE = 'pep-v20';
+const CACHE = 'pep-v21';
 const SHELL = ['./', 'index.html', 'style.css', 'icon.svg', 'manifest.webmanifest',
   'js/core.js', 'js/auth-login.js', 'js/nav.js', 'js/plan.js', 'js/dialogs.js', 'js/mitarbeiter.js', 'js/fotos.js', 'js/campus.js', 'js/personal.js', 'js/verwaltung.js', 'js/abwesenheit.js', 'js/kalender.js', 'js/tausch.js', 'js/benachrichtigungen.js', 'js/wuensche.js', 'js/zeiten.js', 'js/export.js', 'js/recht.js', 'js/passkey.js', 'js/demo.js', 'js/stempeluhr.js', 'js/personenplan.js', 'js/abschluss.js', 'js/rueckmeldung.js', 'js/konto.js'];
 const API = new URL('api/', self.registration.scope).pathname;
@@ -34,7 +34,7 @@ self.addEventListener('notificationclick', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith(API)) return;
+  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith(API) || url.pathname.endsWith('.apk')) return;
   // Netz zuerst (immer aktuelle Version), bei Funkloch die gespeicherte Hülle
   e.respondWith(fetch(e.request).then((res) => {
     if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); }

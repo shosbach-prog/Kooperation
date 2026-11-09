@@ -58,6 +58,13 @@ test('Startseite mit getrenntem Demo-Bereich: Rollen ohne Anmeldung, echte Daten
     liveDb.close();
     assert.equal(rm.length, 1);
     assert.match(rm[0].name, /\(Demo\)/);
+    // Android-App: Bestätigung an der Domain-Wurzel und Download
+    const al = await (await fetch(`${base}/.well-known/assetlinks.json`)).json();
+    assert.equal(al[0].target.package_name, 'de.roboticstarter.dienstplan');
+    assert.match(al[0].target.sha256_cert_fingerprints[0], /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
+    const apk = await fetch(`${base}/lwl/dienstplan.apk`);
+    assert.equal(apk.status, 200);
+    assert.match(apk.headers.get('content-type'), /android\.package-archive/);
     // getrennte Dateien
     assert.ok(fs.existsSync(path.join(dir, 'demo', 'demo.db')));
   } finally { proc.kill(); }

@@ -1,0 +1,42 @@
+plugins { id 'com.android.application' }
+
+def appUrl = project.findProperty('appUrl') ?: 'https://roboticstarter.de/lwl/'
+def appHost = new URI(appUrl).host
+def appPath = new URI(appUrl).path ?: '/'
+
+android {
+    namespace 'de.roboticstarter.dienstplan'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'de.roboticstarter.dienstplan'
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+        manifestPlaceholders = [hostName: appHost, pathPrefix: appPath, launchUrl: appUrl]
+        resValue 'string', 'launchUrl', appUrl
+        resValue 'string', 'assetStatements', """[{ "relation": ["delegate_permission/common.handle_all_urls"], "target": { "namespace": "web", "site": "https://${appHost}" } }]"""
+    }
+    signingConfigs {
+        release {
+            // Signaturschlüssel liegt NICHT im Repository (siehe android/README.md)
+            def ks = System.getenv('DIENSTPLAN_KEYSTORE') ?: "${rootDir}/signing/dienstplan.jks"
+            storeFile file(ks)
+            storePassword System.getenv('DIENSTPLAN_KEYSTORE_PASSWORD') ?: ''
+            keyAlias 'dienstplan'
+            keyPassword System.getenv('DIENSTPLAN_KEYSTORE_PASSWORD') ?: ''
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+    lint { checkReleaseBuilds false; abortOnError false }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+
+dependencies {
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+}

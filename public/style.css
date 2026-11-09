@@ -642,3 +642,4 @@ table.pp-table tr.pp-group-extern th { color: #8a3d00; }
 .cell .is-fp .avatar { outline: 2px solid #8e5bd6; }
 .legend .l-fp::before { background: #8e5bd6; }
 .legend .l-ext::before { background: #e07a1f; }
+.android-app { text-align: center; margin: .6rem 0 0; }
