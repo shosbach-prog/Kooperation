@@ -737,3 +737,41 @@ body.app #bottomnav { grid-auto-columns: minmax(0, 1fr); }
   .anw-toolbar { display: none; }
   .anw-personen { grid-template-columns: 1fr 1fr; }
 }
+
+/* ---------- Anwesenheit: Monitor-Ansicht (Vollbild, ohne Menü) ---------- */
+body.anw-monitor #topbar, body.anw-monitor #bottomnav, body.anw-monitor .nav-backdrop, body.anw-monitor .skip-link, body.anw-monitor .app-update { display: none !important; }
+body.anw-monitor main { position: fixed; inset: 0; max-width: none; margin: 0 !important; padding: 0 !important; background: var(--bg); z-index: 50; overflow: hidden; }
+body.anw-monitor main > * { max-width: none; }
+.mon { --s: 1; height: 100vh; height: 100dvh; display: flex; flex-direction: column; padding: calc(var(--s) * 10px + 8px) calc(var(--s) * 14px + 10px); gap: calc(var(--s) * 8px + 4px); box-sizing: border-box; }
+.mon-kopf { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; }
+.mon-titel { font-size: 1.7rem; font-weight: 700; line-height: 1.15; }
+.mon-bereich { font-weight: 400; color: var(--muted); }
+.mon-datum { color: var(--muted); font-size: 1.15rem; }
+.mon-summen { display: flex; gap: .6rem; flex-wrap: wrap; flex: 1; justify-content: center; }
+.mon-summe { padding: .35rem .8rem; border-radius: 999px; background: var(--card); border: 1px solid var(--line); font-size: 1.05rem; white-space: nowrap; }
+.mon-summe b { font-size: 1.35rem; }
+.mon-summe.ok b { color: var(--ok); } .mon-summe.bad b { color: var(--bad); } .mon-summe.info b { color: var(--info); }
+.mon-uhr { font-size: 2.6rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+.mon-ende { background: transparent; color: var(--muted); border: 1px solid var(--line); min-width: 0; padding: .3rem .6rem; opacity: .45; }
+.mon-ende:hover, .mon-ende:focus-visible { opacity: 1; }
+.mon-spalten { flex: 1; min-height: 0; display: flex; gap: calc(var(--s) * 8px + 4px); }
+.mon-spalte { flex: 1 1 calc(var(--s) * 200px + 60px); min-width: calc(var(--s) * 200px + 60px); display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-top: 6px solid var(--line); border-radius: var(--radius); padding: calc(var(--s) * 8px + 4px); }
+.mon-spalte.ok { border-top-color: var(--ok); } .mon-spalte.bad { border-top-color: var(--bad); } .mon-spalte.info { border-top-color: var(--info); } .mon-spalte.neutral { border-top-color: var(--muted); }
+.mon-spalte h2 { display: flex; justify-content: space-between; align-items: baseline; font-size: calc(var(--s) * .5rem + .8rem); margin: 0 0 calc(var(--s) * 6px); }
+.mon-zahl { font-size: 1.2em; font-weight: 800; }
+.mon-spalte.ok .mon-zahl { color: var(--ok); } .mon-spalte.bad .mon-zahl { color: var(--bad); } .mon-spalte.info .mon-zahl { color: var(--info); }
+.mon-liste { list-style: none; margin: 0; padding: 0; flex: 1; min-height: 0; overflow: hidden; display: grid; align-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--s) * 210px + 40px), 1fr)); column-gap: calc(var(--s) * 10px + 4px); }
+.mon-person { display: flex; align-items: center; gap: calc(var(--s) * 8px + 2px); padding: calc(var(--s) * 4px + 1px) 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.mon-person .avatar { width: calc(var(--s) * 48px) !important; height: calc(var(--s) * 48px) !important; font-size: calc(var(--s) * 18px) !important; flex: none; }
+.mon-info { min-width: 0; flex: 1; }
+.mon-name { font-weight: 650; font-size: calc(var(--s) * 1.05rem); line-height: 1.2; display: flex; flex-wrap: wrap; align-items: center; gap: .3em; }
+.mon-name .badge { font-size: .7em; }
+.mon-name .btag { margin-left: 0; font-size: .6em; }
+.mon-detail { font-size: calc(var(--s) * .85rem); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; }
+.mon-detail .chip { font-size: .85em; }
+.mon-spalte.knapp .s-frei .mon-name, .mon-spalte.knapp .s-dienst_beendet .mon-name { font-weight: 500; color: var(--muted); }
+.mon-spalte.knapp .s-frei .avatar, .mon-spalte.knapp .s-dienst_beendet .avatar { opacity: .7; }
+
+.mon-leer { color: var(--muted); font-size: 1.4rem; margin: .5rem 0; }
+.mon-fuss { color: var(--muted); font-size: .85rem; text-align: right; }

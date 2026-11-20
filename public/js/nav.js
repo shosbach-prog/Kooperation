@@ -135,6 +135,7 @@ async function go(view, opts = {}) {
   if (view === 'protokolle' && !opts.behalte) state.protokollShift = null;
   if (view === 'rueckmeldung' && state.view && state.view !== view) state.vorherigeAnsicht = VIEWS[state.view]?.label || '';
   state.view = view;
+  if (view !== 'anwesenheit') document.body.classList.remove('anw-monitor');
   location.hash = view;
   renderTabs();
   window.scrollTo({ top: 0 });
