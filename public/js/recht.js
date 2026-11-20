@@ -103,9 +103,35 @@ async function appUpdateHinweis() {
   } catch { /* ohne Netz: nichts anzeigen */ }
 }
 appUpdateHinweis();
-/** Hinweis „Android-App herunterladen“ – nur auf Android-Geräten im Browser, nicht in der App selbst */
+/* Installation als App über den Browser (Web-App/PWA) statt APK-Download.
+   Hintergrund: Eine APK außerhalb des Play Stores löst bei Chrome und Google Play Protect Warnungen aus
+   („Datei könnte schädlich sein“, „Unbekannte Apps installieren“), die Beschäftigte für einen Virus halten.
+   Die APK bleibt für bereits installierte Apps erreichbar (Update-Hinweis oben), wird aber nicht mehr beworben. */
+let installAngebot = null;
+window.addEventListener('beforeinstallprompt', (ev) => {
+  ev.preventDefault();
+  installAngebot = ev;
+  document.querySelectorAll('.android-app').forEach((el) => el.replaceWith(androidAppHinweis() || ''));
+});
+window.addEventListener('appinstalled', () => {
+  installAngebot = null;
+  document.querySelectorAll('.android-app').forEach((el) => el.remove());
+});
+const alsAppGestartet = () => {
+  try { return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; } catch { return false; }
+};
+
+/** Hinweis „Als App installieren“ – nur auf Android-Geräten im Browser, nicht in der (installierten) App selbst */
 function androidAppHinweis() {
-  if (inAndroidApp || !/Android/i.test(navigator.userAgent)) return null;
-  return h('p', { class: 'small android-app' }, h('a', { href: 'dienstplan.apk', download: 'Dienstplan.apk' }, '📱 Android-App herunterladen'),
-    h('span', { class: 'muted' }, ' – Installation: Datei öffnen und „Installieren“ tippen (ggf. „Unbekannte Apps installieren“ für den Browser erlauben).'));
+  if (inAndroidApp || alsAppGestartet() || !/Android/i.test(navigator.userAgent)) return null;
+  if (installAngebot) {
+    return h('p', { class: 'small android-app' },
+      h('button', { type: 'button', class: 'ghost', onclick: async () => {
+        const angebot = installAngebot;
+        installAngebot = null;
+        try { await angebot.prompt(); await angebot.userChoice; } catch { /* abgebrochen */ }
+      } }, '📱 Als App installieren'));
+  }
+  return h('p', { class: 'small android-app muted' },
+    '📱 Als App nutzen: im Browser-Menü ⋮ „App installieren“ bzw. „Zum Startbildschirm hinzufügen“ tippen.');
 }
