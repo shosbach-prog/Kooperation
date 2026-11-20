@@ -25,6 +25,7 @@ const ICON_PATHS = {
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
   bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0"/>',
+  presence: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5 1.6 0 3 .4 4.1 1.2"/><path d="M15 17.5l2 2 4-4.5"/>',
   swap: '<path d="M7 4L3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/>',
   logout: '<path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3M15 17l5-5-5-5M20 12H9"/>',
 };
@@ -48,6 +49,7 @@ const VIEWS = {
   protokolle: { label: 'Schichtprotokoll', short: 'Protokoll', icon: 'clipboard', group: 'mein', render: () => renderProtokolle() },
   rueckmeldung: { label: 'Rückmeldung', icon: 'chat', group: 'mein', render: () => renderRueckmeldung(), badge: 'rueckmeldung' },
   account: { label: 'Mein Profil', short: 'Profil', icon: 'user', group: 'mein', render: () => renderAccount() },
+  anwesenheit: { label: 'Anwesenheit', short: 'Anwesend', icon: 'presence', group: 'verw', render: () => renderAnwesenheit(), mgr: true },
   abwesenheiten: { label: 'Abwesenheiten', short: 'Anträge', icon: 'inbox', group: 'verw', render: () => renderAbsencesMgr(), mgr: true, badge: 'abwesenheiten' },
   staff: { label: 'Personal', icon: 'users', group: 'verw', render: () => renderStaff(), mgr: true },
   stationen: { label: 'Campus & Stationen', short: 'Campus', icon: 'campus', group: 'verw', render: () => renderStations(), mgr: true, full: true },
@@ -64,7 +66,7 @@ const viewAllowed = (v) => (v.full ? isFullMgr() : v.mgr ? isMgr() : v.staff ? i
 
 /** Schnellzugriff unten (Handy/Tablet), je nach Rolle */
 function bottomKeys() {
-  if (isMgr() && !isStaffRole()) return ['plan', 'abwesenheiten', 'staff'];
+  if (isMgr() && !isStaffRole()) return ['plan', 'anwesenheit', 'abwesenheiten', 'staff'];
   if (isMgr()) return ['plan', 'stempel', 'mine', 'abwesenheiten'];
   return ['plan', 'stempel', 'mine', 'abwesenheit'];
 }

@@ -701,3 +701,39 @@ body.app #bottomnav { grid-auto-columns: minmax(0, 1fr); }
 .app-update span { flex: 1; min-width: 10rem; }
 .app-update a.button { background: var(--primary-ink); color: var(--primary); padding: .45rem .8rem; border-radius: var(--radius-sm); text-decoration: none; font-weight: 700; }
 .app-update button { color: var(--primary-ink); border-color: transparent; }
+
+/* ---------- Anwesenheit ---------- */
+:root { --info: #2f5f9e; --info-bg: #e8f0fb; }
+@media (prefers-color-scheme: dark) { :root { --info: #8cb4ea; --info-bg: #1b2a3d; } }
+.anw-titel { margin-top: -.25rem; }
+.anw-tag { display: flex; align-items: center; gap: .35rem; }
+.anw-tag input[type="date"] { min-width: 0; width: auto; }
+.anw-tag button { min-width: var(--touch); }
+.anw-kacheln { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: .6rem; margin-bottom: .5rem; }
+.anw-kachel { display: flex; flex-direction: column; align-items: flex-start; gap: .1rem; padding: .7rem .85rem; border-radius: var(--radius);
+  border: 1px solid var(--line); background: var(--card); color: var(--text); box-shadow: var(--shadow); text-align: left; cursor: pointer; min-height: var(--touch); }
+.anw-kachel .anw-zahl { font-size: 1.7rem; font-weight: 700; line-height: 1.1; }
+.anw-kachel .anw-klabel { font-size: .85rem; color: var(--muted); font-weight: 600; }
+.anw-kachel.ok { border-left: 5px solid var(--ok); } .anw-kachel.ok .anw-zahl { color: var(--ok); }
+.anw-kachel.bad { border-left: 5px solid var(--bad); } .anw-kachel.bad .anw-zahl { color: var(--bad); }
+.anw-kachel.info { border-left: 5px solid var(--info); } .anw-kachel.info .anw-zahl { color: var(--info); }
+.anw-kachel.neutral { border-left: 5px solid var(--line); }
+.anw-kachel.aktiv { outline: 2px solid var(--primary); outline-offset: 1px; }
+.anw-kachel.aktiv.ok { background: var(--ok-bg); } .anw-kachel.aktiv.bad { background: var(--bad-bg); } .anw-kachel.aktiv.info { background: var(--info-bg); } .anw-kachel.aktiv.neutral { background: var(--full-bg); }
+.anw-gruppe h2 { display: flex; align-items: center; gap: .5rem; }
+.anw-anzahl { font-weight: 400; font-size: .95rem; }
+.anw-punkt { width: .7rem; height: .7rem; border-radius: 50%; flex: none; background: var(--line); }
+.anw-punkt.ok { background: var(--ok); } .anw-punkt.bad { background: var(--bad); } .anw-punkt.info { background: var(--info); } .anw-punkt.neutral { background: var(--muted); }
+.anw-personen { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr)); gap: .1rem 1.25rem; }
+.anw-person { display: flex; gap: .7rem; align-items: flex-start; padding: .55rem 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.anw-person .avatar { flex: none; }
+.anw-info { flex: 1 1 160px; min-width: 0; }
+.anw-name { font-weight: 600; display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; }
+.anw-name .btag { margin-left: 0; }
+.anw-dienste { display: flex; flex-direction: column; gap: .2rem; font-size: .85rem; flex: 0 1 auto; padding-left: calc(36px + .7rem); }
+@media (min-width: 760px) { .anw-dienste { padding-left: 0; align-items: flex-end; text-align: right; } }
+.anw-dienst { white-space: nowrap; }
+@media print {
+  .anw-toolbar { display: none; }
+  .anw-personen { grid-template-columns: 1fr 1fr; }
+}

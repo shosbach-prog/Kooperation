@@ -23,6 +23,7 @@ Arbeitszeit wird angelehnt an den **TVöD (BT-K)** angerechnet.
 - **Weitere Verwalter/innen und Vertretungen:** Die Hauptverwaltung kann Mitarbeitenden Verwaltungsrechte geben,
   dauerhaft oder **befristet als Vertretung** (endet automatisch). Verwalter/innen arbeiten weiter selbst im Dienstplan mit;
   eigene Urlaubsanträge muss eine andere Verwaltung genehmigen (Vier-Augen-Prinzip). Rechte vergeben kann nur die Hauptverwaltung.
+- **Anwesenheit:** Übersicht über das gesamte Personal für heute oder einen beliebigen Tag – anwesend (eingestempelt bzw. laut Dienstplan im Dienst), krank, Urlaub, sonstige Abwesenheit, Dienst später, frei; Zahlen als Kacheln (antippen = filtern), Filter nach Gebäude/Station und Suche, Hinweise „nicht eingestempelt“ und „AU fehlt“; heute aktualisiert sich die Ansicht jede Minute
 - **Abwesenheiten:** Urlaubsanträge genehmigen oder (mit Begründung) ablehnen, Krankmeldungen mit Status der AU-Bescheinigung, Abwesenheiten direkt eintragen (z. B. bei telefonischer Krankmeldung)
 - **Protokoll** aller Ein- und Austragungen mit Begründung sowie aller Abwesenheiten
 - **Auswertung TVöD** je Monat: Soll, Ist, Saldo, Nacht-, Sonntags-, Feiertags- und Vorfeststunden, Zuschläge in Euro, Liste der unterbesetzten Schichten, **CSV-Export** für Excel
